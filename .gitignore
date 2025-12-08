@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+env/
+venv/
+.ai/
+
+# FastAPI logs
+*.log
+
+# CSV（必要に応じて）
+backend/data/*.csv
+
+# Node
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+
+# React build
+frontend/build/
+
+# VSCode
+.vscode/
+
+# OS files
+.DS_Store
+Thumbs.db
