@@ -1,4 +1,7 @@
 import React, { useState } from "react";
+import Search from "./Search.jsx";
+import Result from "./Result.jsx";
+import { Route } from "react-router-dom";
 
 export default function App() {
   const [name, setName] = useState("");
@@ -22,23 +25,33 @@ export default function App() {
   };
 
   return (
-  <div style={{ padding: "40px" }}>
-    <h1>企業レポートAI</h1>
+    
+  // <div style={{ padding: "40px" }}>
+  //   <h1>企業レポートAI</h1>
 
-    <input
-      type="text"
-      placeholder="企業名を入力"
-      value={name}
-      onChange={(e) => setName(e.target.value)}
-      style={{ padding: "10px", width: "300px" }}
-    />
-    <button onClick={handleSearch} style={{ marginLeft: "10px", padding: "10px" }}>
-      検索
-    </button>
+  //   <input
+  //     type="text"
+  //     placeholder="企業名を入力"
+  //     value={name}
+  //     onChange={(e) => setName(e.target.value)}
+  //     style={{ padding: "10px", width: "300px" }}
+  //   />
+  //   <button onClick={handleSearch} style={{ marginLeft: "10px", padding: "10px" }}>
+  //     検索
+  //   </button>
 
-    <pre style={{ marginTop: "20px", background: "#eee", padding: "20px", whiteSpace: "pre-wrap" }}>
-      {result}
-    </pre>
-  </div>
+  //   <pre style={{ marginTop: "20px", background: "#eee", padding: "20px", whiteSpace: "pre-wrap" }}>
+  //     {result}
+  //   </pre>
+  // </div>
+
+  <Route>
+    {/* ログイン成功後の画面 */}
+      <Route path="/search" element={<Search />} />
+
+      {/* 検索結果（左右に分割される画面） */}
+      <Route path="/result" element={<Result />} />
+  </Route>
   );
+
 }
