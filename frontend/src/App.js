@@ -1,8 +1,5 @@
 import React, { useState } from "react";
-import { Routes, Route } from "react-router-dom";
-import Loginpage from "./Loginpage.jsx";
-import Search from "./Search.jsx";
-import Result from "./Result.jsx";
+
 export default function App() {
   const [name, setName] = useState("");
   const [result, setResult] = useState("");
