@@ -1,6 +1,9 @@
 import React, { useState } from "react";
-
-function App() {
+import { Routes, Route } from "react-router-dom";
+import Loginpage from "./Loginpage.jsx";
+import Search from "./Search.jsx";
+import Result from "./Result.jsx";
+export default function App() {
   const [name, setName] = useState("");
   const [result, setResult] = useState("");
 
@@ -22,25 +25,23 @@ function App() {
   };
 
   return (
-    <div style={{ padding: "40px" }}>
-      <h1>企業レポートAI</h1>
+  <div style={{ padding: "40px" }}>
+    <h1>企業レポートAI</h1>
 
-      <input
-        type="text"
-        placeholder="企業名を入力"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-        style={{ padding: "10px", width: "300px" }}
-      />
-      <button onClick={handleSearch} style={{ marginLeft: "10px", padding: "10px" }}>
-        検索
-      </button>
+    <input
+      type="text"
+      placeholder="企業名を入力"
+      value={name}
+      onChange={(e) => setName(e.target.value)}
+      style={{ padding: "10px", width: "300px" }}
+    />
+    <button onClick={handleSearch} style={{ marginLeft: "10px", padding: "10px" }}>
+      検索
+    </button>
 
-      <pre style={{ marginTop: "20px", background: "#eee", padding: "20px", whiteSpace: "pre-wrap" }}>
-        {result}
-      </pre>
-    </div>
+    <pre style={{ marginTop: "20px", background: "#eee", padding: "20px", whiteSpace: "pre-wrap" }}>
+      {result}
+    </pre>
+  </div>
   );
 }
-
-export default App;
