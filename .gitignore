@@ -10,8 +10,7 @@ venv/
 # FastAPI logs
 *.log
 
-# CSV（必要に応じて）
-backend/data/*.csv
+
 
 # Node
 node_modules/
