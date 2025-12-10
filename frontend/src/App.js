@@ -1,3 +1,4 @@
+import CompanySearch from "./CompanySearch";
 import Loginpage from "./Loginpage.jsx";
 import Search from "./Search.jsx";
 import Result from "./Result.jsx";
@@ -46,8 +47,9 @@ export default function App() {
   // </div>
 
   <Routes>
+    <Route path="/" element={<CompanySearch />} />
       {/* 最初の画面 = ログイン */}
-      <Route path="/" element={<Loginpage />} />
+      <Route path="/loginpage" element={<Loginpage />} />
     {/* ログイン成功後の画面 */}
       <Route path="/search" element={<Search />} />
 
