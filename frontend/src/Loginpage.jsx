@@ -1,6 +1,11 @@
     // Loginpage.jsx
     import { useState } from "react";
     import { useNavigate } from "react-router-dom";
+    import jobnaviImg from "./assets/jobnavi.png";
+    import sonsonImg from "./assets/sonson.png";
+    import passwordImg from "./assets/password.png";
+    import inteligensImg from "./assets/inteligens.png";
+    import inteligensCube from "./assets/InteligensCube.png";
 
     export default function Loginpage() {
     const [email, setEmail] = useState("");
@@ -57,7 +62,7 @@
         setIsSubmitting(false);
     }
     };
-    const handleOpen = () => setOpen(true);
+    const handleToggle = () => setOpen((prev) => !prev);
     const handleClose = () => setOpen(false);
 
     return (
@@ -281,7 +286,7 @@
         <button
             type="button"
             className="grid-menu-btn"
-            onClick={handleOpen}
+            onClick={handleToggle} 
         >
             <div className="grid-menu-icon">
             {Array.from({ length: 9 }).map((_, i) => (
@@ -300,32 +305,20 @@
             >
             {/* ① JobNavi */}
             <div className="grid-menu-card">
-                <img
-                className="grid-menu-img"
-                src="src/assets/jobnavi.png"
-                alt="JobNavi"
-                />
-                <p className="grid-menu-text">JobNavi</p>
+            <img className="grid-menu-img" src={jobnaviImg} alt="JobNavi" />
+            <p className="grid-menu-text">JobNavi</p>
             </div>
 
             {/* ② 受験報告閲覧 */}
             <div className="grid-menu-card">
-                <img
-                className="grid-menu-img"
-                src="src/assets/sonson.png"
-                alt="受験報告閲覧"
-                />
-                <p className="grid-menu-text">受験報告閲覧</p>
+            <img className="grid-menu-img" src={sonsonImg} alt="受験報告閲覧" />
+            <p className="grid-menu-text">受験報告閲覧</p>
             </div>
 
             {/* ③ パスワード変更 */}
             <div className="grid-menu-card">
-                <img
-                className="grid-menu-img"
-                src="src/assets/password.png"
-                alt="パスワード変更"
-                />
-                <p className="grid-menu-text">パスワード変更</p>
+            <img className="grid-menu-img" src={passwordImg} alt="パスワード変更" />
+            <p className="grid-menu-text">パスワード変更</p>
             </div>
 
             {/* ④ Inteligens（新規） */}
@@ -336,11 +329,7 @@
             navigate("/"); // ← ログイン画面へ戻す
             }}
             >
-                <img
-                className="grid-menu-img"
-                src="src/assets/inteligens.png"
-                alt="Inteligens"
-                />
+                <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
                 <p className="grid-menu-text">Inteligens</p>
             </div>
 
@@ -397,12 +386,13 @@
         {/* 下部のキューブ＆バージョン表記 */}
         <div className="login-footer">
         <img
-            src="src/assets/inteligensCube.png"
+            className="login-cube" 
+            src={inteligensCube}
             alt="JobNavi cube logo"
-            className="login-cube"
         />
         <div className="login-version">JobNavi v2.5.3</div>
         </div>
     </div>
+    
     );
     }

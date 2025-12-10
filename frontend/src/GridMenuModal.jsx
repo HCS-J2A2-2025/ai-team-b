@@ -2,11 +2,16 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
+import jobnaviImg from "./assets/jobnavi.png";
+import sonsonImg from "./assets/sonson.png";
+import passwordImg from "./assets/password.png";
+import inteligensImg from "./assets/inteligens.png";
+
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
-  const navigate = useNavigate();   // ★ 追加
+  const navigate = useNavigate();
 
-  const handleOpen = () => setOpen(true);
+  const handleToggle = () => setOpen((prev) => !prev);
   const handleClose = () => setOpen(false);
 
   return (
@@ -103,7 +108,7 @@ export default function GridMenuModal() {
       `}</style>
 
       {/* ヘッダーのグリッドボタン */}
-      <button type="button" className="grid-menu-btn" onClick={handleOpen}>
+      <button type="button" className="grid-menu-btn" onClick={handleToggle}>
         <div className="grid-menu-icon">
           {Array.from({ length: 9 }).map((_, i) => (
             <span key={i} className="grid-menu-dot" />
@@ -120,48 +125,32 @@ export default function GridMenuModal() {
           >
             {/* ① JobNavi */}
             <div className="grid-menu-card">
-              <img
-                className="grid-menu-img"
-                src="src/assets/jobnavi.png"
-                alt="JobNavi"
-              />
-              <p className="grid-menu-text">JobNavi</p>
+            <img className="grid-menu-img" src={jobnaviImg} alt="JobNavi" />
+            <p className="grid-menu-text">JobNavi</p>
             </div>
 
             {/* ② 受験報告閲覧 */}
             <div className="grid-menu-card">
-              <img
-                className="grid-menu-img"
-                src="src/assets/sonson.png"
-                alt="受験報告閲覧"
-              />
-              <p className="grid-menu-text">受験報告閲覧</p>
+            <img className="grid-menu-img" src={sonsonImg} alt="受験報告閲覧" />
+            <p className="grid-menu-text">受験報告閲覧</p>
             </div>
 
             {/* ③ パスワード変更 */}
             <div className="grid-menu-card">
-              <img
-                className="grid-menu-img"
-                src="src/assets/password.png"
-                alt="パスワード変更"
-              />
-              <p className="grid-menu-text">パスワード変更</p>
+            <img className="grid-menu-img" src={passwordImg} alt="パスワード変更" />
+            <p className="grid-menu-text">パスワード変更</p>
             </div>
 
-            {/* ④ Inteligens（新規） → ログイン画面に戻す */}
+            {/* ④ Inteligens（新規） */}
             <div
-              className="grid-menu-card"
-              onClick={() => {
-                setOpen(false);
-                navigate("/");   // ★ ここでトップ（ログイン）へ
-              }}
+            className="grid-menu-card"
+            onClick={() => {
+            setOpen(false);
+            navigate("/"); // ← ログイン画面へ戻す
+            }}
             >
-              <img
-                className="grid-menu-img"
-                src="src/assets/inteligens.png"
-                alt="Inteligens"
-              />
-              <p className="grid-menu-text">Inteligens</p>
+                <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
+                <p className="grid-menu-text">Inteligens</p>
             </div>
 
             <button
