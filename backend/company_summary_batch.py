@@ -128,6 +128,7 @@ def summarize_company(group_df):
 # ====== ★あなたの generate_detailed_report を統合 ======
 def generate_detailed_report(row):
     import json
+    import os
     import requests
 
     # -----------------------------
@@ -141,81 +142,93 @@ def generate_detailed_report(row):
     latest = json.loads(row["latest_records"])
 
     # -----------------------------
-    # 2. 高品質 system prompt（AIに性格と役割を与える）
+    # 2. system prompt
     # -----------------------------
     SYSTEM_PROMPT = """
 あなたは「日本語文章生成の専門家」かつ「キャリアセンターのプロアドバイザー」です。
 
 【最重要ルール】
 - 日本語として不自然・破綻した文を絶対に生成しない
-- 固有名詞の捏造（例：フランク氏など）は絶対にしない
+- 固有名詞の捏造（例：〇〇氏など）は絶対にしない
 - CSV に存在する情報以外は推測しない
-- 「読み物として自然な文章」を生成する
 - 文体は必ず丁寧語（です・ます調）
-- ロジックの整合性を保つ（論理の飛躍を禁止）
+- 出力フォーマットを絶対に守る
 
-【文章構成（必ずこの順番）】
-① 企業全体の特徴と面接傾向の総括
-② よく聞かれる質問テーマと、その背景
-③ 面接の雰囲気（割合をもとに自然に説明）
-④ 面接形式（オンライン/対面の比率と理由）
-⑤ 服装の傾向とそこから読み取れる企業文化
-⑥ 直近の面接記録の傾向と読み取れるポイント
-⑦ 評価されやすい人物像
-⑧ 学生への具体的なアドバイス
-⑨ 最後に 100〜200字のまとめ
+【出力フォーマット】
+以下の４つのブロックをこの順番・この見出しで出力してください。
 
-【文体ルール】
-- 明確・論理的・自然・破綻なし
-- 無理に難しい言葉は使わない
-- 感情表現は控えめ
+■ 雰囲気
+1〜3文で、面接の雰囲気を自然な日本語で説明してください。
+
+■ よく聞かれる質問
+箇条書き（「・」または「-」）で3〜6個程度、よく聞かれる質問テーマを書いてください。
+「学生時代に力を入れたこと（ガクチカ）」のように、質問そのものではなく“テーマ名”で構いません。
+
+■ 服装
+1〜2文で、服装の基本方針を自然な日本語で説明してください。
+スーツが多いのか、オフィスカジュアル可なのか、などをデータから読み取って書いてください。
+
+■ 面接形式
+1〜2文で、オンライン・対面の割合や、対面の場合の実施場所の傾向などを説明してください。
+
+※データにない情報を無理に推測して書かないこと。
+※論理の飛躍は禁止。
 """
 
     # -----------------------------
-    # 3. user prompt（CSV からのデータをそのまま渡す）
+    # 3. user prompt（データを渡す）
     # -----------------------------
     USER_PROMPT = f"""
 以下は企業「{company_name}」に関する面接データです。
-このデータのみを使い、800〜1500字で自然な日本語の面接傾向レポートを作成してください。
+このデータだけをもとに、指定された４ブロック構成でレポートを作成してください。
 
-【質問内容の傾向】
+【質問内容の傾向（タグ）】
 {tags}
 
-【面接の雰囲気の分布】
+【面接の雰囲気の分布（例: {{'穏やか': 0.7, 'フランク': 0.3}}）】
 {atmos}
 
-【面接形式】
+【面接形式の分布（例: {{'オンライン': 0.6, '対面': 0.4}}）】
 {form}
 
-【服装】
+【服装の分布（例: {{'スーツ': 0.8, '私服': 0.2}}）】
 {dress}
 
 【直近の面接記録】
 {latest}
-
-※データにない情報を推測して書かないこと。
-※固有名詞の捏造は禁止。
 """
 
     # -----------------------------
-    # 4. ローカル LLM に送信
+    # 4. Ollama の URL 組み立て
     # -----------------------------
-    response = requests.post(
-        "http://localhost:11434/v1/chat/completions",
-        json={
-            "model": "phi3",
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": USER_PROMPT}
-            ],
-            "temperature": 0.4,   # ←自然な文章に最適
-        }
-    )
+    base = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    if not base.startswith("http://") and not base.startswith("https://"):
+        base = "http://" + base
+    url = base.rstrip("/") + "/api/generate"
 
-    response.raise_for_status()
+    prompt = SYSTEM_PROMPT.strip() + "\n\n" + USER_PROMPT.strip()
+
+    try:
+        response = requests.post(
+            url,
+            json={
+                "model": "phi3",   # ollama のモデル名に合わせる
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.4,
+                },
+            },
+            timeout=600,
+        )
+    except Exception as e:
+        return f"[ERROR] Ollama への接続に失敗しました: {e}"
+
+    if not response.ok:
+        return f"[ERROR] Ollama API error {response.status_code}: {response.text}"
+
     data = response.json()
-
-    return data["choices"][0]["message"]["content"].strip()
+    return data.get("response", "").strip() or "[ERROR] Ollama から空の応答が返されました"
 
 
 
