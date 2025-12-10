@@ -13,7 +13,18 @@ export default function GridMenuModal() {
 
   const handleToggle = () => setOpen((prev) => !prev);
   const handleClose = () => setOpen(false);
+  const handleClickInteligens = () => {
+    const stored = localStorage.getItem("jobnaviUser");
+    setOpen(false);
 
+    if (stored) {
+      // ログイン中 → 検索画面へ
+      navigate("/search");
+    } else {
+      // 未ログイン → ログイン画面へ
+      navigate("/loginpage"); // ルーティングに合わせて変更
+    }
+  };
   return (
     <>
       <style>{`
@@ -65,6 +76,7 @@ export default function GridMenuModal() {
           display: flex;
           flex-direction: column;
           gap: 12px;
+          overflow: visible; /* はみ出し防止で追加しておくと安心 */
         }
 
         .grid-menu-card {
@@ -144,10 +156,7 @@ export default function GridMenuModal() {
             {/* ④ Inteligens（新規） */}
             <div
             className="grid-menu-card"
-            onClick={() => {
-            setOpen(false);
-            navigate("/"); // ← ログイン画面へ戻す
-            }}
+            onClick={handleClickInteligens}
             >
                 <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
                 <p className="grid-menu-text">Inteligens</p>

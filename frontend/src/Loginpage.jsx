@@ -6,6 +6,7 @@
     import passwordImg from "./assets/password.png";
     import inteligensImg from "./assets/inteligens.png";
     import inteligensCube from "./assets/InteligensCube.png";
+    import { DUMMY_USERS } from "./usersDummy"; 
 
     export default function Loginpage() {
     const [email, setEmail] = useState("");
@@ -26,45 +27,49 @@
     setIsSubmitting(true);
 
     try {
-        const res = await fetch("http://localhost:8000/api/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            email: email,
-            password: password,
-        }),
-        });
+        const trimmedEmail = email.trim();
+        const trimmedPassword = password.trim();
 
-        if (!res.ok) {
-        // 401 / 403 など
+        // メールアドレス一致ユーザーを検索
+        const user = DUMMY_USERS.find((u) => u.email === trimmedEmail);
+
+        // ユーザーなし or パスワード不一致
+        if (!user || user.password !== trimmedPassword) {
         setError("メールアドレスまたはパスワードが違います。");
-        setIsSubmitting(false);
         return;
         }
 
-        const data = await res.json();
-        // data: { email, role, message: "OK" }
-
-        // ロール情報を保存（検索画面・CSV制御に使う）
+        // ログイン情報を保存（パスワードは保存しない）
         localStorage.setItem(
         "jobnaviUser",
         JSON.stringify({
-            email: data.email,
-            role: data.role, // "student"/"teacher"/"admin"
+            email: user.email,
+            role: user.role, // "student"/"teacher"/"admin"
+            name: user.name,
         })
         );
 
         // 検索画面へ遷移
         navigate("/search");
-    } catch (err) {
-        console.error(err);
-        setError("サーバーに接続できませんでした。");
+    } finally {
         setIsSubmitting(false);
     }
     };
     const handleToggle = () => setOpen((prev) => !prev);
     const handleClose = () => setOpen(false);
-
+    // ★ Inteligens クリック時：ログイン状態で遷移先分岐
+    const handleClickInteligens = () => {
+    const stored = localStorage.getItem("jobnaviUser");
+    setOpen(false);
+    console.log("inteligensImg =", inteligensImg);
+    if (stored) {
+        // ログイン中 → 検索画面へ
+        navigate("/search");
+    } else {
+        // 未ログイン → ログイン画面へ（このコンポーネント自身）
+        navigate("/loginpage"); // ルーティングによっては "/login" などに変更
+    }
+    };
     return (
     <div className="login-root">
         <style>{`
@@ -136,6 +141,7 @@
             display: flex;
             flex-direction: column;
             gap: 12px;
+            overflow: visible;
         }
 
         .grid-menu-card {
@@ -324,15 +330,11 @@
             {/* ④ Inteligens（新規） */}
             <div
             className="grid-menu-card"
-            onClick={() => {
-            setOpen(false);
-            navigate("/"); // ← ログイン画面へ戻す
-            }}
+            onClick={handleClickInteligens}
             >
                 <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
                 <p className="grid-menu-text">Inteligens</p>
             </div>
-
             <button
                 type="button"
                 className="grid-menu-close-btn"
@@ -370,15 +372,13 @@
                 onChange={(e) => setPassword(e.target.value)}
             />
             </div>
-
+            {error && <p className="login-error">{error}</p>}
             <button
-            type="submit"
-            className={`login-button ${
-                isFormValid ? "login-button--active" : ""
-            }`}
-            disabled={!isFormValid}
+                type="submit"
+                className={`login-button ${isFormValid ? "login-button--active" : ""}`}
+                disabled={!isFormValid|| isSubmitting}
             >
-            ログイン
+                ログイン
             </button>
         </form>
         </div>

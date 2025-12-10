@@ -5,7 +5,8 @@
     export default function AppHeader({ title, onLogout }) {
         const navigate = useNavigate();
         const handleLogout = () => {
-            navigate("/");        // ログイン画面へ
+            localStorage.removeItem("jobnaviUser");
+            navigate("/loginpage");        // ログイン画面へ
         };
     return (
     <>
