@@ -1,13 +1,13 @@
-import React, { useState } from "react";
+import Loginpage from "./Loginpage.jsx";
 import Search from "./Search.jsx";
 import Result from "./Result.jsx";
-import { Route } from "react-router-dom";
+import { Routes, Route } from "react-router-dom";
 
 export default function App() {
-  const [name, setName] = useState("");
-  const [result, setResult] = useState("");
+  //const [name, setName] = useState("");
+  //const [result, setResult] = useState("");
 
-  const handleSearch = async () => {
+  /*const handleSearch = async () => {
     if (!name) return;
 
     try {
@@ -22,7 +22,7 @@ export default function App() {
     } catch (error) {
       setResult("API 接続エラー");
     }
-  };
+  };*/
 
   return (
     
@@ -45,13 +45,15 @@ export default function App() {
   //   </pre>
   // </div>
 
-  <Route>
+  <Routes>
+      {/* 最初の画面 = ログイン */}
+      <Route path="/" element={<Loginpage />} />
     {/* ログイン成功後の画面 */}
       <Route path="/search" element={<Search />} />
 
       {/* 検索結果（左右に分割される画面） */}
       <Route path="/result" element={<Result />} />
-  </Route>
+  </Routes>
   );
 
 }
