@@ -8,6 +8,7 @@
     const [selectedFile, setSelectedFile] = useState(null); // 選択中CSV
     const [isDragOver, setIsDragOver] = useState(false);    // ドラッグ中か
     const [role, setRole] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false); // 検索中フラグ
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
@@ -16,7 +17,7 @@
     const stored = localStorage.getItem("jobnaviUser");
     if (!stored) {
         // 未ログイン → ログインページに戻す
-        navigate("/");
+        navigate("/loginpage");
         return;
     }
     try {
@@ -24,16 +25,50 @@
         setRole(user.role); // "student" / "teacher" / "admin"
     } catch (e) {
         console.error(e);
-        navigate("/");
+        navigate("/loginpage");
     }
     }, [navigate]);
 
     // 検索ボタン押したときに /result へ遷移 + 会社名を渡す
-    const handleSubmit = (e) => {
+    const handleSubmit = async(e) => {
     e.preventDefault();
-    navigate("/result", {
-        state: { companyName: company }
+        if (!company.trim() || isSubmitting) return;
+
+    setIsSubmitting(true);
+    try {
+    const res = await fetch("http://localhost:8000/company", {
+        method: "POST",
+        headers: {
+        "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: company }),
     });
+
+    const data = await res.json();
+
+    let reportText = "";
+    if (data.error) {
+        reportText = "企業が見つかりません";
+    } else {
+        reportText = data.report;
+    }
+
+    navigate("/result", {
+        state: {
+        companyName: company,
+        report: reportText,
+        },
+    });
+    } catch (error) {
+    navigate("/result", {
+        state: {
+        companyName: company,
+        report: "API 接続エラー",
+        },
+    });
+    } finally {
+    setIsSubmitting(false);
+    }
     };
 
     const handleLogout = () => {
@@ -323,8 +358,12 @@
                 />
                 </div>
 
-                <button type="submit" className="search-button">
-                検　索
+                <button
+                type="submit"
+                className="search-button"
+                disabled={isSubmitting}
+                >
+                {isSubmitting ? "検索中..." : "検　索"}
                 </button>
             </form>
             </section>

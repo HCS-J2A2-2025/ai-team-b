@@ -1,39 +1,44 @@
 // Result.jsx
-import { useState } from 'react';
+import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import AppHeader from './AppHeader';
+import AppHeader from "./AppHeader";
 
 export default function Result() {
   const location = useLocation();
-  const companyName = location.state?.companyName || "会社名が入力されてません";
+
+  const initialCompanyName =
+    location.state?.companyName || "会社名が入力されてません";
+  const initialReport = location.state?.report || "";
 
   const [expandedItem, setExpandedItem] = useState(null);
-  const [searchQuery, setSearchQuery] = useState(companyName);
+  const [searchQuery, setSearchQuery] = useState(initialCompanyName);
+  const [report, setReport] = useState(initialReport);
+  const [isLoading, setIsLoading] = useState(false);
 
   const examRecords = [
     {
       id: 1,
-      title: '一次面接',
-      year: '2024年',
-      term: '学部4年',
-      status: '合格',
-      type: 'オンライン',
+      title: "一次面接",
+      year: "2024年",
+      term: "学部4年",
+      status: "合格",
+      type: "オンライン",
     },
     {
       id: 2,
-      title: '二次面接',
-      year: '2024年',
-      term: '学部3年',
-      status: '合格',
-      type: '対面',
+      title: "二次面接",
+      year: "2024年",
+      term: "学部3年",
+      status: "合格",
+      type: "対面",
     },
     {
       id: 3,
-      title: '最終面接',
-      year: '2023年',
-      term: '学部4年',
-      status: '合格',
-      type: 'オンライン',
+      title: "最終面接",
+      year: "2023年",
+      term: "学部4年",
+      status: "合格",
+      type: "オンライン",
     },
   ];
 
@@ -42,246 +47,233 @@ export default function Result() {
   };
 
   const handleLogout = () => {
-    console.log('ログアウトしました');
+    console.log("ログアウトしました");
   };
 
-  const handleSearchSubmit = (e) => {
+  // 再検索 => POST /company
+  const handleSearchSubmit = async (e) => {
     e.preventDefault();
-    console.log('再検索:', searchQuery);
+    if (!searchQuery.trim() || isLoading) return;
+
+    setIsLoading(true);
+    try {
+      const res = await fetch("http://localhost:8000/company", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name: searchQuery }),
+      });
+
+      const data = await res.json();
+
+      if (data.error) {
+        setReport("企業が見つかりません");
+      } else {
+        setReport(data.report);
+      }
+    } catch (error) {
+      setReport("API 接続エラー");
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const styles = {
     container: {
-      minHeight: '100vh',
-      backgroundColor: '#f5f5f5',
+      minHeight: "100vh",
+      backgroundColor: "#f5f5f5",
       fontFamily:
         '-apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif',
     },
-
     mainContent: {
-      maxWidth: '1400px',
-      margin: '0 auto',
-      padding: '24px 16px 40px',
+      maxWidth: "1400px",
+      margin: "0 auto",
+      padding: "24px 16px 40px",
     },
-
-    /* ─── 再検索エリア ─── */
     searchArea: {
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '12px',
-      marginBottom: '32px',
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: "12px",
+      marginBottom: "32px",
     },
     searchForm: {
-      width: '100%',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      gap: '16px',
+      width: "100%",
+      display: "flex",
+      flexDirection: "column",
+      alignItems: "center",
+      gap: "16px",
     },
     searchInputRow: {
-      width: '100%',
-      display: 'flex',
-      justifyContent: 'center',
-      gap: '12px',
-      flexWrap: 'wrap',
+      width: "100%",
+      display: "flex",
+      justifyContent: "center",
+      gap: "12px",
+      flexWrap: "wrap",
     },
     searchInputWrapper: {
-      width: 'min(620px, 95vw)',
-      borderRadius: '999px',
-      border: '1px solid #cfcfcf',
-      padding: '10px 20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-      backgroundColor: '#ffffff',
+      width: "min(620px, 95vw)",
+      borderRadius: "999px",
+      border: "1px solid #cfcfcf",
+      padding: "10px 20px",
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      backgroundColor: "#ffffff",
     },
     searchIcon: {
-      fontSize: '18px',
-      color: '#aaaaaa',
+      fontSize: "18px",
+      color: "#aaaaaa",
     },
     searchInput: {
       flex: 1,
-      border: 'none',
-      outline: 'none',
-      fontSize: '16px',
+      border: "none",
+      outline: "none",
+      fontSize: "16px",
       fontWeight: 600,
-      color: '#333',
-      background: 'transparent',
+      color: "#333",
+      background: "transparent",
     },
     searchButton: {
-      minWidth: '140px',
-      padding: '10px 32px',
-      borderRadius: '999px',
-      border: '1px solid #00b400',
-      backgroundColor: '#11ff11',
-      fontSize: '16px',
+      minWidth: "140px",
+      padding: "10px 32px",
+      borderRadius: "999px",
+      border: "1px solid #00b400",
+      backgroundColor: "#11ff11",
+      fontSize: "16px",
       fontWeight: 400,
-      letterSpacing: '0.3em',
-      color: '#ffffff',
-      cursor: 'pointer',
-      boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-      whiteSpace: 'nowrap',
+      letterSpacing: "0.3em",
+      color: "#ffffff",
+      cursor: "pointer",
+      boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+      whiteSpace: "nowrap",
+      opacity: isLoading ? 0.7 : 1,
     },
     searchMetaText: {
-      width: '100%',
-      maxWidth: '960px',
-      fontSize: '14px',
-      color: '#555',
-      textAlign: 'left',
+      width: "100%",
+      maxWidth: "960px",
+      fontSize: "14px",
+      color: "#555",
+      textAlign: "left",
     },
-
-    /* ─── 結果カード ─── */
     contentGrid: {
-      display: 'flex',
-      flexWrap: 'wrap',
-      gap: '30px',
-      alignItems: 'stretch',
+      display: "flex",
+      flexWrap: "wrap",
+      gap: "30px",
+      alignItems: "stretch",
     },
     card: {
-      background: 'white',
-      borderRadius: '12px',
-      padding: '30px',
-      boxShadow: '0 2px 10px rgba(0, 0, 0, 0.08)',
-      border: '1px solid #e8e8e8',
-      flex: '1 1 320px',
-      minWidth: '280px',
-      maxWidth: '100%',
+      background: "white",
+      borderRadius: "12px",
+      padding: "30px",
+      boxShadow: "0 2px 10px rgba(0, 0, 0, 0.08)",
+      border: "1px solid #e8e8e8",
+      flex: "1 1 320px",
+      minWidth: "280px",
+      maxWidth: "100%",
     },
     aiReportHeader: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-      marginBottom: '30px',
-      paddingBottom: '15px',
-      borderBottom: '2px solid #f0f0f0',
+      display: "flex",
+      alignItems: "center",
+      gap: "10px",
+      marginBottom: "30px",
+      paddingBottom: "15px",
+      borderBottom: "2px solid #f0f0f0",
     },
     aiIcon: {
-      fontSize: '24px',
+      fontSize: "24px",
     },
     aiReportTitle: {
-      fontSize: '20px',
+      fontSize: "20px",
       fontWeight: 700,
-      color: '#8b5cf6',
+      color: "#8b5cf6",
       margin: 0,
     },
-    reportSection: {
-      marginBottom: '25px',
-    },
-    sectionHeader: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-      marginBottom: '12px',
-    },
-    sectionIcon: {
-      fontSize: '20px',
-    },
-    sectionTitle: {
-      fontSize: '16px',
-      fontWeight: 700,
-      color: '#333',
-      margin: 0,
-    },
-    sectionContent: {
-      paddingLeft: '35px',
-      fontSize: '14px',
+    reportBody: {
+      fontSize: "14px",
       lineHeight: 1.7,
-      color: '#555',
-      margin: 0,
+      color: "#555",
+      whiteSpace: "pre-wrap",
     },
-    sectionList: {
-      listStyle: 'none',
-      paddingLeft: '35px',
-      margin: 0,
-    },
-    listItem: {
-      fontSize: '14px',
-      lineHeight: 1.8,
-      color: '#555',
-      marginBottom: '6px',
-    },
-
     examRecordsTitle: {
-      fontSize: '18px',
+      fontSize: "18px",
       fontWeight: 700,
-      color: '#333',
-      marginBottom: '20px',
+      color: "#333",
+      marginBottom: "20px",
     },
     recordsList: {
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '15px',
+      display: "flex",
+      flexDirection: "column",
+      gap: "15px",
     },
     recordItem: {
-      border: '1px solid #e0e0e0',
-      borderRadius: '8px',
-      overflow: 'hidden',
-      transition: 'all 0.2s ease',
+      border: "1px solid #e0e0e0",
+      borderRadius: "8px",
+      overflow: "hidden",
+      transition: "all 0.2s ease",
     },
     recordButton: {
-      width: '100%',
-      padding: '18px 20px',
-      background: 'white',
-      border: 'none',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      transition: 'background-color 0.2s ease',
-      fontFamily: 'inherit',
+      width: "100%",
+      padding: "18px 20px",
+      background: "white",
+      border: "none",
+      cursor: "pointer",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "space-between",
+      transition: "background-color 0.2s ease",
+      fontFamily: "inherit",
     },
     recordInfo: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '15px',
-      flexWrap: 'wrap',
+      display: "flex",
+      alignItems: "center",
+      gap: "15px",
+      flexWrap: "wrap",
     },
     recordTitle: {
-      fontSize: '15px',
+      fontSize: "15px",
       fontWeight: 700,
-      color: '#333',
+      color: "#333",
     },
     recordMeta: {
-      fontSize: '13px',
-      color: '#666',
+      fontSize: "13px",
+      color: "#666",
     },
     recordStatus: {
-      padding: '4px 12px',
-      backgroundColor: '#d4f4dd',
-      color: '#2d7f3e',
-      fontSize: '12px',
+      padding: "4px 12px",
+      backgroundColor: "#d4f4dd",
+      color: "#2d7f3e",
+      fontSize: "12px",
       fontWeight: 600,
-      borderRadius: '12px',
+      borderRadius: "12px",
     },
     chevronIcon: {
-      width: '20px',
-      height: '20px',
-      color: '#999',
-      transition: 'transform 0.3s ease',
+      width: "20px",
+      height: "20px",
+      color: "#999",
+      transition: "transform 0.3s ease",
       flexShrink: 0,
     },
     chevronRotated: {
-      transform: 'rotate(180deg)',
+      transform: "rotate(180deg)",
     },
     recordDetail: {
-      padding: '20px',
-      backgroundColor: '#f9f9f9',
-      borderTop: '1px solid #e8e8e8',
-      fontSize: '13px',
-      color: '#666',
+      padding: "20px",
+      backgroundColor: "#f9f9f9",
+      borderTop: "1px solid #e8e8e8",
+      fontSize: "13px",
+      color: "#666",
       lineHeight: 1.6,
     },
   };
 
   return (
     <div style={styles.container}>
-      {/* 共通ヘッダー */}
       <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
 
-      {/* メインコンテンツ */}
       <main style={styles.mainContent}>
-        {/* 再検索エリア（Google 風） */}
+        {/* 再検索エリア */}
         <section style={styles.searchArea}>
           <form style={styles.searchForm} onSubmit={handleSearchSubmit}>
             <div style={styles.searchInputRow}>
@@ -297,7 +289,7 @@ export default function Result() {
               </div>
 
               <button type="submit" style={styles.searchButton}>
-                検　索
+                {isLoading ? "検索中..." : "検　索"}
               </button>
             </div>
           </form>
@@ -313,58 +305,17 @@ export default function Result() {
           <div style={styles.card}>
             <div style={styles.aiReportHeader}>
               <span style={styles.aiIcon}>✨</span>
-              <h3 style={styles.aiReportTitle}>AI要約レポート</h3>
+              <h3 style={styles.aiReportTitle}>
+                AI要約レポート（{searchQuery || initialCompanyName}）
+              </h3>
             </div>
 
-            {/* 雰囲気 */}
-            <div style={styles.reportSection}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionIcon}>🧠</span>
-                <h4 style={styles.sectionTitle}>雰囲気</h4>
-              </div>
-              <p style={styles.sectionContent}>
-                温かく和やかな雰囲気、面接官は話をよく聞いてくれる傾向。学生の意見を尊重し、対話形式で進むことが多い。
-              </p>
-            </div>
-
-            {/* よく聞かれる質問 */}
-            <div style={styles.reportSection}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionIcon}>❓</span>
-                <h4 style={styles.sectionTitle}>よく聞かれる質問</h4>
-              </div>
-              <ul style={styles.sectionList}>
-                <li style={styles.listItem}>• 学生時代に力を入れたこと（ガクチカ）</li>
-                <li style={styles.listItem}>• なぜ事業を志望するのか</li>
-                <li style={styles.listItem}>• チームでの役割や論番経験</li>
-                <li style={styles.listItem}>• 入社後にやりたいこと</li>
-              </ul>
-            </div>
-
-            {/* 服装 */}
-            <div style={styles.reportSection}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionIcon}>👔</span>
-                <h4 style={styles.sectionTitle}>服装</h4>
-              </div>
-              <p style={styles.sectionContent}>
-                スーツ着用が基本。一部オンライン面接では「オフィスカジュアル可」との記載あり。
-              </p>
-            </div>
-
-            {/* 面接形式 */}
-            <div style={styles.reportSection}>
-              <div style={styles.sectionHeader}>
-                <span style={styles.sectionIcon}>💼</span>
-                <h4 style={styles.sectionTitle}>面接形式</h4>
-              </div>
-              <p style={styles.sectionContent}>
-                おおむね面接官2名、学生側は1名もしくは2名で実施されている。
-              </p>
-            </div>
+            <p style={styles.reportBody}>
+              {report || "レポートがまだ取得されていません。検索してください。"}
+            </p>
           </div>
 
-          {/* 右カラム - 受験記録一覧 */}
+          {/* 右カラム - 受験記録一覧（ダミー） */}
           <div style={styles.card}>
             <h3 style={styles.examRecordsTitle}>
               受験記録一覧({examRecords.length}件)
@@ -378,10 +329,10 @@ export default function Result() {
                     onClick={() => toggleExpand(record.id)}
                     style={styles.recordButton}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.backgroundColor = '#fafafa';
+                      e.currentTarget.style.backgroundColor = "#fafafa";
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.backgroundColor = 'white';
+                      e.currentTarget.style.backgroundColor = "white";
                     }}
                   >
                     <div style={styles.recordInfo}>

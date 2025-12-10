@@ -1,10 +1,9 @@
 import os
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import pandas as pd
 from company_summary_batch import generate_detailed_report
-
-app = FastAPI()
-from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
@@ -15,32 +14,30 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# POST で受け取るリクエストボディ
+class CompanyRequest(BaseModel):
+    name: str
 
-
-@app.get("/company/{name}")
-def get_company_report(name: str):
-
-    # CSV のパスを backend/data/company_summary_t.csv に統一
+def _create_report(name: str):
     BASE_DIR = os.path.dirname(__file__)
     SUMMARY_PATH = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
 
-    # CSV 読み込み
     df = pd.read_csv(SUMMARY_PATH)
 
-    # 部分一致で企業を検索
     hit = df[df["company_name"].str.contains(name, na=False)]
 
-    # 見つからない時
     if hit.empty:
-        return {"error": f"企業 '{name}' が見つかりません"}
+        return None, {"error": f"企業 '{name}' が見つかりません"}
 
-    # 最初の1件を使う
     row = hit.iloc[0]
-
-    # レポート生成
     report = generate_detailed_report(row)
 
-    return {
+    return row, {
         "company": row["company_name"],
         "report": report
     }
+    # 新しく POST 版を追加
+@app.post("/company")
+def post_company_report(req: CompanyRequest):
+    row, result = _create_report(req.name)
+    return result
