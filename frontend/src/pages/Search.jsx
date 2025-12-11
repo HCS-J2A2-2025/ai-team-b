@@ -1,6 +1,6 @@
     // Search.jsx
     import { useState, useRef , useEffect } from 'react';
-    import AppHeader from './AppHeader';
+    import AppHeader from '../components/AppHeader';
     import { useNavigate } from "react-router-dom";
 
     export default function Search() {

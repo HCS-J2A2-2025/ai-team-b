@@ -1,7 +1,7 @@
-import CompanySearch from "./CompanySearch";
-import Loginpage from "./Loginpage.jsx";
-import Search from "./Search.jsx";
-import Result from "./Result.jsx";
+import CompanySearch from "./pages/CompanySearch";
+import Loginpage from "./pages/Loginpage.jsx";
+import Search from "./pages/Search.jsx";
+import Result from "./pages/Result.jsx";
 import { Routes, Route } from "react-router-dom";
 
 export default function App() {

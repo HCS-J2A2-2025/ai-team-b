@@ -1,12 +1,12 @@
     // Loginpage.jsx
     import { useState } from "react";
     import { useNavigate } from "react-router-dom";
-    import jobnaviImg from "./assets/jobnavi.png";
-    import sonsonImg from "./assets/sonson.png";
-    import passwordImg from "./assets/password.png";
-    import inteligensImg from "./assets/inteligens.png";
-    import inteligensCube from "./assets/InteligensCube.png";
-    import { DUMMY_USERS } from "./usersDummy"; 
+    import jobnaviImg from "../assets/jobnavi.png";
+    import sonsonImg from "../assets/sonson.png";
+    import passwordImg from "../assets/password.png";
+    import inteligensImg from "../assets/inteligens.png";
+    import inteligensCube from "../assets/InteligensCube.png";
+    import { DUMMY_USERS } from "../data/usersDummy"; 
 
     export default function Loginpage() {
     const [email, setEmail] = useState("");

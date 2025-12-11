@@ -1,7 +1,7 @@
 // Result.jsx
 import { useState } from "react";
 import { useLocation } from "react-router-dom";
-import AppHeader from "./AppHeader";
+import AppHeader from "../components/AppHeader";
 
 export default function Result() {
   const location = useLocation();

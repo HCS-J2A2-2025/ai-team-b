@@ -2,10 +2,10 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 
-import jobnaviImg from "./assets/jobnavi.png";
-import sonsonImg from "./assets/sonson.png";
-import passwordImg from "./assets/password.png";
-import inteligensImg from "./assets/inteligens.png";
+import jobnaviImg from "../assets/jobnavi.png";
+import sonsonImg from "../assets/sonson.png";
+import passwordImg from "../assets/password.png";
+import inteligensImg from "../assets/inteligens.png";
 
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
