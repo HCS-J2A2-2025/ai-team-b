@@ -79,9 +79,13 @@ export default function Search() {
     const handleFileUpload = (e) => {
         const file = e.target.files && e.target.files[0];
         if (!file) return;
+
+        if (!file.name.toLowerCase().endsWith(".csv")) {
+            alert("CSV ファイルのみ選択できます");
+            return;
+        }
         setSelectedFile(file);
         console.log("選択されたファイル:", file.name);
-        handleCsvUpload(file);
     };
 
     const handleBrowseClick = () => {
@@ -113,6 +117,13 @@ export default function Search() {
         setSelectedFile(file);
         console.log("ドロップされたファイル:", file.name);
         // ここでアップロード処理を呼び出してもよい
+    };
+
+    const removeSelectedFile = () => {
+        setSelectedFile(null);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = ""; // input の中身リセット
+        }
     };
 
     const handleCsvUpload = async (file) => {
@@ -319,6 +330,42 @@ export default function Search() {
             color: #333333;
         }
 
+        .remove-file-button {
+            position: absolute;
+            top: 6px;
+            right: 6px;
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 50%;
+            background: #e74c3c; /* 赤 */
+            color: white;
+            font-size: 16px;
+            font-weight: bold;
+            line-height: 24px;
+            text-align: center;
+            cursor: pointer;
+            padding: 0;
+            z-index: 10;
+        }
+
+        .remove-file-button:hover {
+            background: #c0392b;
+        }
+
+        .upload-file-wrapper {
+            position: relative;
+            display: inline-block;
+            margin-top: 12px;
+            padding: 10px 50px;
+            background: #ffffff;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+            font-size: 14px;
+            color: #333;
+        }
+
+
         /* ───────── レスポンシブ（スマホ調整）───────── */
 
         @media (max-width: 768px) {
@@ -402,28 +449,45 @@ export default function Search() {
                                 onDrop={handleDrop}
                                 onClick={handleBrowseClick} // 全体クリックでも参照
                             >
+
+
+
+
                                 <div className="upload-cloud" />
-
-                                <button
-                                    type="button"
-                                    className="upload-browse-button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleCsvUpload();
-                                    }}
-                                >
-                                    アップロード
-                                </button>
-
                                 <p className="upload-help-text">
                                     CSVファイルをここにドラッグ＆ドロップする<br />
                                 </p>
 
+
+                                <button
+                                    type="button"
+                                    className="upload-browse-button"
+                                    onClick={() => handleCsvUpload(selectedFile)}
+                                    disabled={!selectedFile}
+                                >
+                                    アップロード
+                                </button>
                                 {selectedFile && (
-                                    <div className="upload-file-name">
-                                        選択中のファイル：{selectedFile.name}
+                                    <div className="upload-file-wrapper">
+                                        <span>{selectedFile.name}</span>
+
+                                        <button
+                                            type="button"
+                                            className="remove-file-button"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                removeSelectedFile();
+                                            }}
+                                        >
+                                            ×
+                                        </button>
                                     </div>
                                 )}
+
+
+
+
+
 
                                 {/* 実際の input は隠す */}
                                 <input
