@@ -4,8 +4,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import pandas as pd
 from company_summary_batch import generate_detailed_report
+from csv_api import router as csv_router
+
 
 app = FastAPI()
+
+app.include_router(csv_router)
 
 app.add_middleware(
     CORSMiddleware,

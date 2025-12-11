@@ -1,13 +1,13 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import APIRouter, UploadFile, File
 import os
 
-app = FastAPI()
+router = APIRouter()
 
 # 保存フォルダ
 UPLOAD_DIR = "data"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
-@app.post("/api/upload_csv")
+@router.post("/api/upload_csv")
 async def upload_csv(file: UploadFile = File(...)):
     # 拡張子チェック
     if not file.filename.lower().endswith(".csv"):
