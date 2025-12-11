@@ -1,9 +1,9 @@
-    // Search.jsx
-    import { useState, useRef , useEffect } from 'react';
-    import AppHeader from '../components/AppHeader';
-    import { useNavigate } from "react-router-dom";
+// Search.jsx
+import { useState, useRef, useEffect } from 'react';
+import AppHeader from '../components/AppHeader';
+import { useNavigate } from "react-router-dom";
 
-    export default function Search() {
+export default function Search() {
     const [company, setCompany] = useState('');
     const [selectedFile, setSelectedFile] = useState(null); // 選択中CSV
     const [isDragOver, setIsDragOver] = useState(false);    // ドラッグ中か
@@ -12,112 +12,136 @@
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
-  // マウント時に ログイン情報を取得
+    // マウント時に ログイン情報を取得
     useEffect(() => {
-    const stored = localStorage.getItem("jobnaviUser");
-    if (!stored) {
-        // 未ログイン → ログインページに戻す
-        navigate("/loginpage");
-        return;
-    }
-    try {
-        const user = JSON.parse(stored);
-        setRole(user.role); // "student" / "teacher" / "admin"
-    } catch (e) {
-        console.error(e);
-        navigate("/loginpage");
-    }
+        const stored = localStorage.getItem("jobnaviUser");
+        if (!stored) {
+            // 未ログイン → ログインページに戻す
+            navigate("/loginpage");
+            return;
+        }
+        try {
+            const user = JSON.parse(stored);
+            setRole(user.role); // "student" / "teacher" / "admin"
+        } catch (e) {
+            console.error(e);
+            navigate("/loginpage");
+        }
     }, [navigate]);
 
     // 検索ボタン押したときに /result へ遷移 + 会社名を渡す
-    const handleSubmit = async(e) => {
-    e.preventDefault();
+    const handleSubmit = async (e) => {
+        e.preventDefault();
         if (!company.trim() || isSubmitting) return;
 
-    setIsSubmitting(true);
-    try {
-    const res = await fetch("http://localhost:8000/company", {
-        method: "POST",
-        headers: {
-        "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: company }),
-    });
+        setIsSubmitting(true);
+        try {
+            const res = await fetch("http://localhost:8000/company", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ name: company }),
+            });
 
-    const data = await res.json();
+            const data = await res.json();
 
-    let reportText = "";
-    if (data.error) {
-        reportText = "企業が見つかりません";
-    } else {
-        reportText = data.report;
-    }
+            let reportText = "";
+            if (data.error) {
+                reportText = "企業が見つかりません";
+            } else {
+                reportText = data.report;
+            }
 
-    navigate("/result", {
-        state: {
-        companyName: company,
-        report: reportText,
-        },
-    });
-    } catch (error) {
-    navigate("/result", {
-        state: {
-        companyName: company,
-        report: "API 接続エラー",
-        },
-    });
-    } finally {
-    setIsSubmitting(false);
-    }
+            navigate("/result", {
+                state: {
+                    companyName: company,
+                    report: reportText,
+                },
+            });
+        } catch (error) {
+            navigate("/result", {
+                state: {
+                    companyName: company,
+                    report: "API 接続エラー",
+                },
+            });
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     const handleLogout = () => {
-    console.log('ログアウトしました');
+        console.log('ログアウトしました');
     };
 
-    // 「参照」ボタン / input change
-    const handleFileChange = (e) => {
-    const file = e.target.files && e.target.files[0];
-    if (!file) return;
-    setSelectedFile(file);
-    console.log("選択されたファイル:", file.name);
-    // ここで実際のアップロード処理(API呼び出しなど)を実装
+    // アップロード用ボタン / input change
+    const handleFileUpload = (e) => {
+        const file = e.target.files && e.target.files[0];
+        if (!file) return;
+        setSelectedFile(file);
+        console.log("選択されたファイル:", file.name);
+        handleCsvUpload(file);
     };
 
     const handleBrowseClick = () => {
-    if (fileInputRef.current) {
-        fileInputRef.current.click();
-    }
+        if (fileInputRef.current) {
+            fileInputRef.current.click();
+        }
     };
 
     // ドラッグ & ドロップ
     const handleDragOver = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(true);
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(true);
     };
 
     const handleDragLeave = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
     };
 
     const handleDrop = (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setIsDragOver(false);
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragOver(false);
 
-    const file = e.dataTransfer.files && e.dataTransfer.files[0];
-    if (!file) return;
-    setSelectedFile(file);
-    console.log("ドロップされたファイル:", file.name);
-    // ここでアップロード処理を呼び出してもよい
+        const file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file) return;
+        setSelectedFile(file);
+        console.log("ドロップされたファイル:", file.name);
+        // ここでアップロード処理を呼び出してもよい
+    };
+
+    const handleCsvUpload = async (file) => {
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append("file", file);
+
+        try {
+            const res = await fetch("http://localhost:8000/api/upload_csv", {
+                method: "POST",
+                body: formData,
+            });
+
+            const data = await res.json();
+
+            if (data.status === "ok") {
+                alert("CSV アップロード成功: " + data.filename);
+            } else {
+                alert("CSV アップロードエラー: " + data.message);
+            }
+        } catch (e) {
+            alert("サーバーに接続できません（API エラー）");
+        }
     };
 
     return (
-    <>
-        <style>{`
+        <>
+            <style>{`
         html, body, #root {
             height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
@@ -336,85 +360,84 @@
         }
         `}</style>
 
-        <div className="app-root">
-        {/* 共通ヘッダー */}
-        <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
+            <div className="app-root">
+                {/* 共通ヘッダー */}
+                <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
 
-        <main className="app-main">
-            {/* 検索機能 */}
-            <section>
-            <h1 className="main-title">JobNavi Inteligens</h1>
+                <main className="app-main">
+                    {/* 検索機能 */}
+                    <section>
+                        <h1 className="main-title">JobNavi Inteligens</h1>
 
-            <form className="search-area" onSubmit={handleSubmit}>
-                <div className="search-input-wrapper">
-                <span className="search-icon">🔍</span>
+                        <form className="search-area" onSubmit={handleSubmit}>
+                            <div className="search-input-wrapper">
+                                <span className="search-icon">🔍</span>
 
-                <input
-                    type="text"
-                    className="search-input"
-                    placeholder="会社名を記入　 例）ダイアモンドヘッド"
-                    value={company}
-                    onChange={(e) => setCompany(e.target.value)}
-                />
-                </div>
+                                <input
+                                    type="text"
+                                    className="search-input"
+                                    placeholder="会社名を記入　 例）ダイアモンドヘッド"
+                                    value={company}
+                                    onChange={(e) => setCompany(e.target.value)}
+                                />
+                            </div>
 
-                <button
-                type="submit"
-                className="search-button"
-                disabled={isSubmitting}
-                >
-                {isSubmitting ? "検索中..." : "検　索"}
-                </button>
-            </form>
-            </section>
-            {role === "admin" && (//CSVアップロード欄（常に表示）
-                <section className="upload-section">
-                    <div className="upload-title">CSV一括登録（管理者用）</div>
+                            <button
+                                type="submit"
+                                className="search-button"
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? "検索中..." : "検　索"}
+                            </button>
+                        </form>
+                    </section>
+                    {role === "admin" && (//CSVアップロード欄（常に表示）
+                        <section className="upload-section">
+                            <div className="upload-title">CSV一括登録（管理者用）</div>
 
-                    <div
-                        className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
-                        onClick={handleBrowseClick} // 全体クリックでも参照
-                    >
-                        <div className="upload-cloud" />
+                            <div
+                                className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
+                                onDragOver={handleDragOver}
+                                onDragLeave={handleDragLeave}
+                                onDrop={handleDrop}
+                                onClick={handleBrowseClick} // 全体クリックでも参照
+                            >
+                                <div className="upload-cloud" />
 
-                        <button
-                        type="button"
-                        className="upload-browse-button"
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            handleBrowseClick();
-                        }}
-                        >
-                        参　照
-                        </button>
+                                <button
+                                    type="button"
+                                    className="upload-browse-button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleCsvUpload();
+                                    }}
+                                >
+                                    アップロード
+                                </button>
 
-                        <p className="upload-help-text">
-                        CSVファイルをここにドラッグ＆ドロップするか、<br />
-                        「参照」ボタンから選択してください。
-                        </p>
+                                <p className="upload-help-text">
+                                    CSVファイルをここにドラッグ＆ドロップする<br />
+                                </p>
 
-                        {selectedFile && (
-                        <div className="upload-file-name">
-                            選択中のファイル：{selectedFile.name}
-                        </div>
-                        )}
+                                {selectedFile && (
+                                    <div className="upload-file-name">
+                                        選択中のファイル：{selectedFile.name}
+                                    </div>
+                                )}
 
-                        {/* 実際の input は隠す */}
-                        <input
-                        type="file"
-                        accept=".csv"
-                        ref={fileInputRef}
-                        style={{ display: 'none' }}
-                        onChange={handleFileChange}
-                        />
-                    </div>
-                </section>
-            )}
-        </main>
-        </div>
-    </>
+                                {/* 実際の input は隠す */}
+                                <input
+                                    type="file"
+                                    accept=".csv"
+                                    ref={fileInputRef}
+                                    style={{ display: 'none' }}
+                                    onChange={handleFileUpload}
+                                />
+                            </div>
+                        </section>
+                    )}
+                </main>
+            </div>
+        </>
     );
-    }
+}
