@@ -212,7 +212,7 @@ def generate_detailed_report(row):
         response = requests.post(
             url,
             json={
-                "model": "phi3",   # ollama のモデル名に合わせる
+                "model": "mistral",   # ollama のモデル名に合わせる
                 "prompt": prompt,
                 "stream": False,
                 "options": {
