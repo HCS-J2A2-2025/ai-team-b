@@ -84,3 +84,8 @@ def company_suggest(body: SuggestRequest):
 
     return {"candidates": filtered}
 
+# POST 版
+@app.post("/company")
+def post_company_report(req: CompanyRequest):
+    row, result = _create_report(req.name, req.student_no)
+    return result
