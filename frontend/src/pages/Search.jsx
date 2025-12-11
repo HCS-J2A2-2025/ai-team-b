@@ -5,6 +5,8 @@ import { useNavigate } from "react-router-dom";
 
 export default function Search() {
     const [company, setCompany] = useState('');
+    const [suggestions, setSuggestions] = useState([]);
+    const [isSuggestLoading, setIsSuggestLoading] = useState(false);
     const [selectedFile, setSelectedFile] = useState(null); // 選択中CSV
     const [isDragOver, setIsDragOver] = useState(false);    // ドラッグ中か
     const [role, setRole] = useState(null);
@@ -149,6 +151,46 @@ export default function Search() {
             alert("サーバーに接続できません（API エラー）");
         }
     };
+    const handleCompanyChange = async (e) => {
+    const value = e.target.value;
+    setCompany(value);
+
+    if (!value) {
+        setSuggestions([]);
+        return;
+    }
+
+    setIsSuggestLoading(true);
+
+    try {
+    const res = await fetch("http://localhost:8000/company_suggest", {
+        method: "POST",
+        headers: {
+        "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ keyword: value }),
+    });
+
+    if (!res.ok) {
+        console.error("候補取得に失敗しました", res.status);
+        setSuggestions([]);
+        return;
+    }
+
+    const data = await res.json();
+    setSuggestions(data.candidates || []);
+    } catch (err) {
+    console.error("候補取得エラー:", err);
+    setSuggestions([]);
+    } finally {
+    setIsSuggestLoading(false);
+    }
+    };
+    const handleSuggestionClick = (name) => {
+        setCompany(name);
+        setSuggestions([]);
+    };
+
 
     return (
         <>
@@ -184,28 +226,21 @@ export default function Search() {
             margin-bottom: 40px;
         }
 
+        /* 検索フォーム全体を中央に置く */
         .search-area {
             display: flex;
             flex-direction: column;
             align-items: center;
-            gap: 24px;
+            gap: 16px;             /* バーとボタンの間隔 */
+            width: 100%;
         }
 
-        .search-input-wrapper {
-            width: min(720px, 95vw);
-            border-radius: 999px;
-            border: 1px solid #999;
-            padding: 10px 24px;
+        /* バー＋予測リストの共通幅をここで決める */
+        .search-wrapper {
+            width: min(820px, 95vw);
             display: flex;
-            align-items: center;
-            gap: 10px;
+            flex-direction: column;
         }
-
-        .search-icon {
-            font-size: 18px;
-            color: #aaaaaa;
-        }
-
         .search-input {
             flex: 1;
             border: none;
@@ -216,13 +251,36 @@ export default function Search() {
             background: transparent;
         }
 
+        /* 検索バー本体（Google 風） */
+        .search-input-wrapper {
+            width: 100%;
+            background-color: #ffffff;
+            border-radius: 24px;
+            border: 1px solid #dcdcdc;
+            padding: 10px 24px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.16);
+        }
+        .search-input-wrapper.has-suggest {
+            border-bottom-left-radius: 0;
+            border-bottom-right-radius: 0;
+        }
+        .search-icon {
+            font-size: 18px;
+            color: #aaaaaa;
+        }
+
+
         .search-input::placeholder {
             color: #c4c4c4;
             font-weight: 400;
         }
 
-        /* 「検索」だけ太字にしない */
         .search-button {
+            align-self: center;
+            margin-top: 8px;
             min-width: 160px;
             padding: 10px 40px;
             border-radius: 999px;
@@ -230,7 +288,6 @@ export default function Search() {
             background-color: #11ff11;
             font-size: 18px;
             font-weight: 400;
-            letter-spacing: 0.4em;
             color: #ffffff;
             cursor: pointer;
             box-shadow: 0 2px 4px rgba(0,0,0,0.2);
@@ -239,7 +296,50 @@ export default function Search() {
         .search-button:active {
             transform: scale(0.95);
         }
+        .suggest-panel {
+            width: 105.9%;
+            margin-top: 0px;
+            background-color: #ffffff;
+            border-radius: 0 0 24px 24px;
+            border: 1px solid #e0e0e0;
+            border-top: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.18);
+            overflow: hidden;
+            max-height: 320px;
+            display: flex;
+            flex-direction: column;
+        }
+        .suggest-row {
+            display: flex;
+            align-items: center;
+            padding: 10px 20px;
+            gap: 12px;
+            font-size: 14px;
+            cursor: pointer;
+        }
 
+        .suggest-row:hover {
+            background-color: #f8f9fa;
+        }
+
+        /* 左側アイコン（履歴マークの代わり） */
+        .suggest-icon {
+            font-size: 12px;
+            color: #8a8a8a;
+        }
+
+        /* テキスト部分 */
+        .suggest-text {
+            flex: 1;
+            color: #202124;
+        }
+
+        /* ローディング表示（任意） */
+        .suggest-loading {
+            padding: 8px 20px;
+            font-size: 12px;
+            color: #777;
+        }
         /* ───────── CSVアップロード欄 ───────── */
 
         .upload-section {
@@ -266,6 +366,7 @@ export default function Search() {
             gap: 20px;
             text-align: center;
             transition: background-color 0.2s ease, border-color 0.2s ease;
+            z-index: 1;
         }
 
         .upload-box.drag-over {
@@ -280,6 +381,7 @@ export default function Search() {
             border-radius: 999px;
             background: #e0e0e0;
             position: relative;
+            z-index: 1;
         }
 
         .upload-cloud::before,
@@ -368,7 +470,7 @@ export default function Search() {
 
         /* ───────── レスポンシブ（スマホ調整）───────── */
 
-        @media (max-width: 768px) {
+        @media (max-width: 750px) {
             .app-main {
             padding: 32px 0 64px;
             }
@@ -380,7 +482,6 @@ export default function Search() {
             }
 
             .search-input-wrapper {
-            width: 94vw;
             padding: 10px 18px;
             }
 
@@ -405,6 +506,7 @@ export default function Search() {
             width: 80vw;
             }
         }
+
         `}</style>
 
             <div className="app-root">
@@ -417,26 +519,53 @@ export default function Search() {
                         <h1 className="main-title">JobNavi Inteligens</h1>
 
                         <form className="search-area" onSubmit={handleSubmit}>
-                            <div className="search-input-wrapper">
-                                <span className="search-icon">🔍</span>
+                        {/* 入力欄＋候補パネルをまとめる */}
+                        <div className="search-wrapper">
+                        <div
+                            className={`search-input-wrapper ${
+                            suggestions.length > 0 ? "has-suggest" : ""
+                            }`}
+                        >
+                            <span className="search-icon">🔍</span>
 
-                                <input
-                                    type="text"
-                                    className="search-input"
-                                    placeholder="会社名を記入　 例）ダイアモンドヘッド"
-                                    value={company}
-                                    onChange={(e) => setCompany(e.target.value)}
-                                />
+                            <input
+                            type="text"
+                            className="search-input"
+                            placeholder="会社名を記入　 例）ダイアモンドヘッド"
+                            value={company}
+                            onChange={handleCompanyChange}
+                            />
+                        </div>
+
+                        {suggestions.length > 0 && (
+                            <div className="suggest-panel">
+                            {isSuggestLoading && (
+                                <div className="suggest-loading">検索中...</div>
+                            )}
+
+                            {suggestions.map((name) => (
+                                <div
+                                key={name}
+                                className="suggest-row"
+                                onClick={() => handleSuggestionClick(name)}
+                                >
+                                <span className="suggest-icon">⏺</span>
+                                <span className="suggest-text">{name}</span>
+                                </div>
+                            ))}
                             </div>
+                        )}
+                        </div>
 
-                            <button
-                                type="submit"
-                                className="search-button"
-                                disabled={isSubmitting}
-                            >
-                                {isSubmitting ? "検索中..." : "検　索"}
-                            </button>
+                        <button
+                            type="submit"
+                            className="search-button"
+                            disabled={isSubmitting}
+                        >
+                            {isSubmitting ? "検索中..." : "検　索"}
+                        </button>
                         </form>
+
                     </section>
                     {role === "admin" && (//CSVアップロード欄（常に表示）
                         <section className="upload-section">

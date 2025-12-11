@@ -22,6 +22,12 @@ app.add_middleware(
 class CompanyRequest(BaseModel):
     name: str
 
+class SuggestRequest(BaseModel):
+    keyword: str
+
+class SuggestResponse(BaseModel):
+    candidates: list[str]
+
 def _create_report(name: str):
     BASE_DIR = os.path.dirname(__file__)
     SUMMARY_PATH = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
@@ -45,3 +51,36 @@ def _create_report(name: str):
 def post_company_report(req: CompanyRequest):
     row, result = _create_report(req.name)
     return result
+@app.post("/company_suggest", response_model=SuggestResponse)
+def company_suggest(body: SuggestRequest):
+    BASE_DIR = os.path.dirname(__file__)
+    SUMMARY_PATH = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
+
+    df = pd.read_csv(SUMMARY_PATH)
+    keyword = body.keyword.strip()
+
+    if not keyword:
+        return {"candidates": []}
+
+    lower = keyword.lower()
+
+    names = (
+        df["company_name"]
+        .dropna()
+        .drop_duplicates()
+        .astype(str)
+        .tolist()
+    )
+
+    prefix_hits = [n for n in names if n.lower().startswith(lower)]
+
+    contains_hits = [
+        n for n in names
+        if lower in n.lower() and n not in prefix_hits
+    ]
+
+    # 最大10件
+    filtered = (prefix_hits + contains_hits)[:15]
+
+    return {"candidates": filtered}
+
