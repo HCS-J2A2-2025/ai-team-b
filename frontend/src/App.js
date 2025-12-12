@@ -3,6 +3,9 @@ import Loginpage from "./pages/Loginpage.jsx";
 import Search from "./pages/Search.jsx";
 import Result from "./pages/Result.jsx";
 import { Routes, Route } from "react-router-dom";
+import StudentPage from "./pages/student";
+
+
 
 export default function App() {
   //const [name, setName] = useState("");
@@ -52,7 +55,7 @@ export default function App() {
       <Route path="/loginpage" element={<Loginpage />} />
     {/* ログイン成功後の画面 */}
       <Route path="/search" element={<Search />} />
-
+      <Route path="/student" element={<StudentPage />} />
       {/* 検索結果（左右に分割される画面） */}
       <Route path="/result" element={<Result />} />
   </Routes>
