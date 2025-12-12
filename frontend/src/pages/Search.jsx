@@ -11,6 +11,7 @@ export default function Search() {
     const [isDragOver, setIsDragOver] = useState(false);    // ドラッグ中か
     const [role, setRole] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false); // 検索中フラグ
+    const [apiError, setApiError] = useState(null);
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
 
@@ -37,6 +38,7 @@ export default function Search() {
         if (!company.trim() || isSubmitting) return;
 
         setIsSubmitting(true);
+        setApiError(null);
         try {
             const res = await fetch("http://localhost:8000/company", {
                 method: "POST",
@@ -45,16 +47,18 @@ export default function Search() {
                 },
                 body: JSON.stringify({ name: company }),
             });
-
-            const data = await res.json();
-
-            let reportText = "";
-            if (data.error) {
-                reportText = "企業が見つかりません";
-            } else {
-                reportText = data.report;
+            if (!res.ok) {
+                // HTTP レベルで失敗（404 等）
+                setApiError(`AI要約レポートの生成に失敗しました（HTTP ${res.status}）`);
+                return; //遷移しない
             }
-
+            const data = await res.json();
+            if (data.error) {
+                // バックエンド側がエラーを返した場合
+                setApiError(data.error || "AI要約レポートの生成中にエラーが発生しました");
+                return; // 遷移しない
+            }
+            const reportText = data.report || "";
             navigate("/result", {
                 state: {
                     companyName: company,
@@ -62,12 +66,8 @@ export default function Search() {
                 },
             });
         } catch (error) {
-            navigate("/result", {
-                state: {
-                    companyName: company,
-                    report: "API 接続エラー",
-                },
-            });
+            console.error(error);
+            setApiError("API 接続エラー：サーバーに接続できませんでした");
         } finally {
             setIsSubmitting(false);
         }
@@ -518,14 +518,68 @@ export default function Search() {
             width: 80vw;
             }
         }
+        /* ───────── ローディングオーバーレイ ───────── */
+
+        .loading-backdrop {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.35);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+        }
+
+        .loading-box {
+            min-width: 260px;
+            max-width: 80vw;
+            padding: 24px 32px;
+            border-radius: 16px;
+            background: #ffffff;
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .loading-text {
+            font-size: 16px;
+            color: #333333;
+            text-align: center;
+        }
+
+        .loading-spinner {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            border: 4px solid #e0e0e0;
+            border-top-color: #1a73e8;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
 
         `}</style>
 
             <div className="app-root">
                 {/* 共通ヘッダー */}
                 <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
-
                 <main className="app-main">
+                    {isSubmitting && (
+                        <div className="loading-backdrop">
+                            <div className="loading-box">
+                                <div className="loading-text">
+                                    AI要約レポートを生成しています…
+                                </div>
+                                <div className="loading-spinner" />
+                            </div>
+                        </div>
+                    )}
                     {/* 検索機能 */}
                     <section>
                         <h1 className="main-title">JobNavi Inteligens</h1>
@@ -576,7 +630,11 @@ export default function Search() {
                                 {isSubmitting ? "検索中..." : "検　索"}
                             </button>
                         </form>
-
+                        {apiError && (
+                            <div style={{ marginTop: "16px", color: "#d32f2f", fontSize: "14px" }}>
+                                {apiError}
+                            </div>
+                        )}
                     </section>
                     {role === "admin" && (//CSVアップロード欄（常に表示）
                         <section className="upload-section">
