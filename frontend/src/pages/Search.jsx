@@ -2,6 +2,7 @@
 import { useState, useRef, useEffect } from 'react';
 import AppHeader from '../components/AppHeader';
 import { useNavigate } from "react-router-dom";
+import '../css/Search.css';
 
 export default function Search() {
     const [company, setCompany] = useState('');
@@ -191,516 +192,129 @@ export default function Search() {
         setSuggestions([]);
     };
 
-
     return (
         <>
-            <style>{`
-        html, body, #root {
-            overflow-x: hidden;   /* ← 横スクロールを強制的に無効化 */
-            height: 100%;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-            font-weight: 600; /* 全体を太字（検索以外） */
-        }
-
-        .app-root {
-            min-height: 100vh;
-            width: 100%;
-            background-color: #ffffff;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ───────── コンテンツ ───────── */
-
-        .app-main {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            width: 100%;
-            justify-content: center;
-            padding: 40px 0 80px;
-            gap: 40px; /* 検索とアップロードの間隔 */
-        }
-
-        .main-title {
-            font-size: 32px;
-            font-weight: 700;
-            margin-bottom: 40px;
-            text-align: center;   /* ← 必須 */
-            align-self: auto;     /* or 消す（推奨） */
-        }
-
-
-        /* 検索フォーム全体を中央に置く */
-        .search-area {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 16px;             /* バーとボタンの間隔 */
-            width: 100%;
-        }
-
-        /* バー＋予測リストの共通幅をここで決める */
-        .search-wrapper {
-            width: min(760px, 95vw); /* ← 安全幅 */
-            margin: 0 auto;          /* ← 中央寄せ */
-            display: flex;
-            flex-direction: column;
-        }
-        .search-input-wrapper,
-        .suggest-panel {
-            box-sizing: border-box;
-        }
-        .search-input {
-            flex: 1;
-            border: none;
-            outline: none;
-            font-size: 18px;
-            color: #555555;
-            font-weight: 600;
-            background: transparent;
-        }
-
-        /* 検索バー本体（Google 風） */
-        .search-input-wrapper {
-            width: 100%;
-            background-color: #ffffff;
-            border-radius: 24px;
-            border: 1px solid #dcdcdc;
-            padding: 10px 24px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.16);
-        }
-        .search-input-wrapper.has-suggest {
-            border-bottom-left-radius: 0;
-            border-bottom-right-radius: 0;
-        }
-        .search-icon {
-            font-size: 18px;
-            color: #aaaaaa;
-        }
-
-
-        .search-input::placeholder {
-            color: #c4c4c4;
-            font-weight: 400;
-        }
-
-        .search-button {
-            align-self: center;
-            margin-top: 8px;
-            min-width: 160px;
-            padding: 10px 40px;
-            border-radius: 999px;
-            border: 1px solid #00b400;
-            background-color: #11ff11;
-            font-size: 18px;
-            font-weight: 400;
-            color: #ffffff;
-            cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-
-        .search-button:active {
-            transform: scale(0.95);
-        }
-        .suggest-panel {
-            width: 100%; /* ← 必ず100%にする */
-            margin-top: 0px;
-            background-color: #ffffff;
-            border-radius: 0 0 24px 24px;
-            border: 1px solid #e0e0e0;
-            border-top: none;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.18);
-            overflow: hidden;
-            max-height: 320px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .suggest-row {
-            display: flex;
-            align-items: center;
-            padding: 10px 20px;
-            gap: 12px;
-            font-size: 14px;
-            cursor: pointer;
-        }
-
-        .suggest-row:hover {
-            background-color: #f8f9fa;
-        }
-
-        /* 左側アイコン（履歴マークの代わり） */
-        .suggest-icon {
-            font-size: 12px;
-            color: #8a8a8a;
-        }
-
-        /* テキスト部分 */
-        .suggest-text {
-            flex: 1;
-            color: #202124;
-        }
-
-        /* ローディング表示（任意） */
-        .suggest-loading {
-            padding: 8px 20px;
-            font-size: 12px;
-            color: #777;
-        }
-        /* ───────── CSVアップロード欄 ───────── */
-
-        .upload-section {
-            width: min(720px, 95vw);
-            display: flex;
-            flex-direction: column;
-            align-items: stretch;
-        }
-
-        .upload-title {
-            font-size: 20px;
-            font-weight: 700;
-            margin-bottom: 12px;
-        }
-
-        .upload-box {
-            padding: 40px 16px 32px;
-            border-radius: 16px;
-            border: 2px dashed #c4c4c4;
-            background-color: #fafafa;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 20px;
-            text-align: center;
-            transition: background-color 0.2s ease, border-color 0.2s ease;
-            z-index: 1;
-        }
-
-        .upload-box.drag-over {
-            border-color: #1a73e8;
-            background-color: #e8f0fe;
-        }
-
-        /* なんとなく雲っぽい形を再現（装飾用） */
-        .upload-cloud {
-            width: 120px;
-            height: 70px;
-            border-radius: 999px;
-            background: #e0e0e0;
-            position: relative;
-            z-index: 1;
-        }
-
-        .upload-cloud::before,
-        .upload-cloud::after {
-            content: "";
-            position: absolute;
-            border-radius: 999px;
-            background: #e0e0e0;
-        }
-
-        .upload-cloud::before {
-            width: 70px;
-            height: 70px;
-            top: -30px;
-            left: 10px;
-        }
-
-        .upload-cloud::after {
-            width: 90px;
-            height: 90px;
-            top: -40px;
-            right: 0;
-        }
-
-        .upload-browse-button {
-            padding: 10px 32px;
-            border-radius: 999px;
-            border: none;
-            background-color: #1a73e8;
-            color: #ffffff;
-            font-size: 16px;
-            cursor: pointer;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-        }
-
-        .upload-browse-button:active {
-            transform: scale(0.96);
-        }
-
-        .upload-help-text {
-            font-size: 14px;
-            color: #666666;
-        }
-
-        .upload-file-name {
-            margin-top: 8px;
-            font-size: 13px;
-            color: #333333;
-        }
-
-        .remove-file-button {
-            position: absolute;
-            top: 6px;
-            right: 6px;
-            width: 24px;
-            height: 24px;
-            border: none;
-            border-radius: 50%;
-            background: #e74c3c; /* 赤 */
-            color: white;
-            font-size: 16px;
-            font-weight: bold;
-            line-height: 24px;
-            text-align: center;
-            cursor: pointer;
-            padding: 0;
-            z-index: 10;
-        }
-
-        .remove-file-button:hover {
-            background: #c0392b;
-        }
-
-        .upload-file-wrapper {
-            position: relative;
-            display: inline-block;
-            margin-top: 12px;
-            padding: 10px 50px;
-            background: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-            font-size: 14px;
-            color: #333;
-        }
-
-
-        /* ───────── レスポンシブ（スマホ調整）───────── */
-
-        @media (max-width: 750px) {
-            .app-main {
-            padding: 32px 0 64px;
-            }
-
-            .main-title {
-            font-size: 26px;
-            margin-bottom: 28px;
-            text-align: center;
-            }
-
-            .search-input-wrapper {
-            padding: 10px 18px;
-            }
-
-            .search-input {
-            font-size: 16px;
-            }
-
-            .search-button {
-            width: 72vw;
-            max-width: 320px;
-            font-size: 16px;
-            letter-spacing: 0.3em;
-            }
-        }
-
-        @media (max-width: 480px) {
-            .main-title {
-            font-size: 22px;
-            }
-
-            .search-button {
-            width: 80vw;
-            }
-        }
-        /* ───────── ローディングオーバーレイ ───────── */
-
-        .loading-backdrop {
-            position: fixed;
-            inset: 0;
-            background: rgba(0, 0, 0, 0.35);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 9999;
-        }
-
-        .loading-box {
-            min-width: 260px;
-            max-width: 80vw;
-            padding: 24px 32px;
-            border-radius: 16px;
-            background: #ffffff;
-            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.25);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 16px;
-        }
-
-        .loading-text {
-            font-size: 16px;
-            color: #333333;
-            text-align: center;
-        }
-
-        .loading-spinner {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            border: 4px solid #e0e0e0;
-            border-top-color: #1a73e8;
-            animation: spin 0.8s linear infinite;
-        }
-
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
-            }
-        }
-
-        `}</style>
-
-            <div className="app-root">
-                {/* 共通ヘッダー */}
-                <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
-                <main className="app-main">
-                    {isSubmitting && (
-                        <div className="loading-backdrop">
-                            <div className="loading-box">
-                                <div className="loading-text">
-                                    AI要約レポートを生成しています…
-                                </div>
-                                <div className="loading-spinner" />
-                            </div>
+        <div className="app-root">
+        {/* 共通ヘッダー */}
+        <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
+        <main className="app-main">
+            {isSubmitting && (
+                <div className="loading-backdrop">
+                    <div className="loading-box">
+                        <div className="loading-text">
+                            AI要約レポートを生成しています…
                         </div>
-                    )}
-                    {/* 検索機能 */}
-                    <section>
-                        <h1 className="main-title">JobNavi Inteligens</h1>
+                        <div className="loading-spinner" />
+                    </div>
+                </div>
+            )}
+            {/* 検索機能 */}
+            <section>
+                <h1 className="main-title">JobNavi Inteligens</h1>
 
-                        <form className="search-area" onSubmit={handleSubmit}>
-                            {/* 入力欄＋候補パネルをまとめる */}
-                            <div className="search-wrapper">
-                                <div
-                                    className={`search-input-wrapper ${suggestions.length > 0 ? "has-suggest" : ""
-                                        }`}
-                                >
-                                    <span className="search-icon">🔍</span>
+                <form className="search-area" onSubmit={handleSubmit}>
+                    {/* 入力欄＋候補パネルをまとめる */}
+                    <div className="search-wrapper">
+                        <div
+                            className={`search-input-wrapper ${suggestions.length > 0 ? "has-suggest" : ""
+                                }`}
+                        >
+                            <span className="search-icon">🔍</span>
 
-                                    <input
-                                        type="text"
-                                        className="search-input"
-                                        placeholder="会社名を記入　 例）ダイアモンドヘッド"
-                                        value={company}
-                                        onChange={handleCompanyChange}
-                                    />
-                                </div>
+                            <input
+                                type="text"
+                                className="search-input"
+                                placeholder="会社名を記入　 例）ダイアモンドヘッド"
+                                value={company}
+                                onChange={handleCompanyChange}
+                            />
+                        </div>
 
-                                {suggestions.length > 0 && (
-                                    <div className="suggest-panel">
-                                        {isSuggestLoading && (
-                                            <div className="suggest-loading">検索中...</div>
-                                        )}
-
-                                        {suggestions.map((name) => (
-                                            <div
-                                                key={name}
-                                                className="suggest-row"
-                                                onClick={() => handleSuggestionClick(name)}
-                                            >
-                                                <span className="suggest-icon">⏺</span>
-                                                <span className="suggest-text">{name}</span>
-                                            </div>
-                                        ))}
-                                    </div>
+                        {suggestions.length > 0 && (
+                            <div className="suggest-panel">
+                                {isSuggestLoading && (
+                                    <div className="suggest-loading">検索中...</div>
                                 )}
-                            </div>
 
-                            <button
-                                type="submit"
-                                className="search-button"
-                                disabled={isSubmitting}
-                            >
-                                {isSubmitting ? "検索中..." : "検　索"}
-                            </button>
-                        </form>
-                        {apiError && (
-                            <div style={{ marginTop: "16px", color: "#d32f2f", fontSize: "14px" }}>
-                                {apiError}
+                                {suggestions.map((name) => (
+                                    <div
+                                        key={name}
+                                        className="suggest-row"
+                                        onClick={() => handleSuggestionClick(name)}
+                                    >
+                                        <span className="suggest-icon">⏺</span>
+                                        <span className="suggest-text">{name}</span>
+                                    </div>
+                                ))}
                             </div>
                         )}
-                    </section>
-                    {role === "admin" && (//CSVアップロード欄（常に表示）
-                        <section className="upload-section">
-                            <div className="upload-title">CSV一括登録（管理者用）</div>
+                    </div>
 
-                            <div
-                                className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
-                                onDragOver={handleDragOver}
-                                onDragLeave={handleDragLeave}
-                                onDrop={handleDrop}
-                                onClick={handleBrowseClick} // 全体クリックでも参照
-                            >
+                    <button
+                        type="submit"
+                        className="search-button"
+                        disabled={isSubmitting}
+                    >
+                        {isSubmitting ? "検索中..." : "検　索"}
+                    </button>
+                </form>
+                {apiError && (
+                    <div style={{ marginTop: "16px", color: "#d32f2f", fontSize: "14px" }}>
+                        {apiError}
+                    </div>
+                )}
+            </section>
+            {role === "admin" && (//CSVアップロード欄（常に表示）
+                <section className="upload-section">
+                    <div className="upload-title">CSV一括登録（管理者用）</div>
 
-
-
-
-                                <div className="upload-cloud" />
-                                <p className="upload-help-text">
-                                    CSVファイルをここにドラッグ＆ドロップする<br />
-                                </p>
-
-
-
-                                {selectedFile && (
-                                    <div className="upload-file-wrapper">
-                                        <span>{selectedFile.name}</span>
-
-                                        <button
-                                            type="button"
-                                            className="remove-file-button"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                removeSelectedFile();
-                                            }}
-                                        >
-                                            ×
-                                        </button>
-                                    </div>
-                                )}
-
-
-
-
-
-
-                                {/* 実際の input は隠す */}
-                                <input
-                                    type="file"
-                                    accept=".csv"
-                                    ref={fileInputRef}
-                                    style={{ display: 'none' }}
-                                    onChange={handleFileUpload}
-                                />
+                    <div
+                        className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onClick={handleBrowseClick} // 全体クリックでも参照
+                    >
+                        <div className="upload-cloud" />
+                        <p className="upload-help-text">
+                            CSVファイルをここにドラッグ＆ドロップする<br />
+                        </p>
+                        {selectedFile && (
+                            <div className="upload-file-wrapper">
+                                <span>{selectedFile.name}</span>
+                                <button
+                                    type="button"
+                                    className="remove-file-button"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        removeSelectedFile();
+                                    }}
+                                >
+                                    ×
+                                </button>
                             </div>
-                            <button
-                                type="button"
-                                className="upload-browse-button"
-                                onClick={() => handleCsvUpload(selectedFile)}
-                                disabled={!selectedFile}
-                            >
-                                アップロード
-                            </button>
-                        </section>
-                    )}
-                </main>
-            </div>
+                        )}
+                        {/* 実際の input は隠す */}
+                        <input
+                            type="file"
+                            accept=".csv"
+                            ref={fileInputRef}
+                            style={{ display: 'none' }}
+                            onChange={handleFileUpload}
+                        />
+                    </div>
+                    <button
+                        type="button"
+                        className="upload-browse-button"
+                        onClick={() => handleCsvUpload(selectedFile)}
+                        disabled={!selectedFile}
+                    >
+                        アップロード
+                    </button>
+                </section>
+            )}
+        </main>
+        </div>
         </>
     );
 }
