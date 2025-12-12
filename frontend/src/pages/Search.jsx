@@ -246,6 +246,11 @@ export default function Search() {
             width: min(760px, 95vw); /* ← 安全幅 */
             margin: 0 auto;          /* ← 中央寄せ */
             display: flex;
+            flex-direction: column;
+        }
+        .search-input-wrapper,
+        .suggest-panel {
+            box-sizing: border-box;
         }
         .search-input {
             flex: 1;

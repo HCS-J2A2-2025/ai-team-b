@@ -6,6 +6,7 @@ import jobnaviImg from "../assets/jobnavi.png";
 import sonsonImg from "../assets/sonson.png";
 import passwordImg from "../assets/password.png";
 import inteligensImg from "../assets/inteligens.png";
+import reportImg from "../assets/report.png";
 
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
@@ -23,6 +24,19 @@ export default function GridMenuModal() {
     } else {
       // 未ログイン → ログイン画面へ
       navigate("/loginpage"); // ルーティングに合わせて変更
+    }
+  };
+
+  const handleClickStudent = () => {
+    const stored = localStorage.getItem("jobnaviUser");
+    setOpen(false);
+    console.log("reportImg =", reportImg);
+    if (stored) {
+      // ログイン中 → 検索画面へ
+      navigate("/student");
+    } else {
+      // 未ログイン → ログイン画面へ（このコンポーネント自身）
+      navigate("/loginpage"); // ルーティングによっては "/login" などに変更
     }
   };
   return (
@@ -138,29 +152,38 @@ export default function GridMenuModal() {
           >
             {/* ① JobNavi */}
             <div className="grid-menu-card">
-            <img className="grid-menu-img" src={jobnaviImg} alt="JobNavi" />
-            <p className="grid-menu-text">JobNavi</p>
+              <img className="grid-menu-img" src={jobnaviImg} alt="JobNavi" />
+              <p className="grid-menu-text">JobNavi</p>
             </div>
 
             {/* ② 受験報告閲覧 */}
             <div className="grid-menu-card">
-            <img className="grid-menu-img" src={sonsonImg} alt="受験報告閲覧" />
-            <p className="grid-menu-text">受験報告閲覧</p>
+              <img className="grid-menu-img" src={sonsonImg} alt="受験報告閲覧" />
+              <p className="grid-menu-text">受験報告閲覧</p>
             </div>
 
             {/* ③ パスワード変更 */}
             <div className="grid-menu-card">
-            <img className="grid-menu-img" src={passwordImg} alt="パスワード変更" />
-            <p className="grid-menu-text">パスワード変更</p>
+              <img className="grid-menu-img" src={passwordImg} alt="パスワード変更" />
+              <p className="grid-menu-text">パスワード変更</p>
             </div>
 
             {/* ④ Inteligens（新規） */}
             <div
-            className="grid-menu-card"
-            onClick={handleClickInteligens}
+              className="grid-menu-card"
+              onClick={handleClickInteligens}
             >
-                <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
-                <p className="grid-menu-text">Inteligens</p>
+              <img className="grid-menu-img" src={inteligensImg} alt="Inteligens" />
+              <p className="grid-menu-text">Inteligens</p>
+            </div>
+
+            {/* ⑤ 受験分析レポート（新規） */}
+            <div
+              className="grid-menu-card"
+              onClick={handleClickStudent}
+            >
+              <img className="grid-menu-img" src={reportImg} alt="受験分析レポート" />
+              <p className="grid-menu-text">受験分析レポート</p>
             </div>
 
             <button
