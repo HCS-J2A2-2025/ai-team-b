@@ -1,4 +1,4 @@
-import  { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import "../student.css";
 import { useNavigate } from "react-router-dom";
 
@@ -10,21 +10,30 @@ function StudentPage() {
   const navigate = useNavigate();
 
   // マウント時に ログイン情報を取得
+  // マウント時に ログイン情報を取得 + 権限チェック
   useEffect(() => {
     const stored = localStorage.getItem("jobnaviUser");
     if (!stored) {
-      // 未ログイン → ログインページに戻す
       navigate("/loginpage");
       return;
     }
+
     try {
       const user = JSON.parse(stored);
-      setRole(user.role); // "student" / "teacher" / "admin"
+
+      // teacher と admin 以外はアクセス禁止
+      if (user.role !== "teacher" && user.role !== "admin") {
+        navigate("/loginpage");
+        return;
+      }
+
+      setRole(user.role);
     } catch (e) {
       console.error(e);
       navigate("/loginpage");
     }
   }, [navigate]);
+
 
   // JSON 読み込み
   useEffect(() => {

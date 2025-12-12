@@ -1,5 +1,5 @@
 // GridMenuModal.jsx
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 
 import jobnaviImg from "../assets/jobnavi.png";
@@ -11,6 +11,7 @@ import reportImg from "../assets/report.png";
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
+  const [role, setRole] = useState(null);
 
   const handleToggle = () => setOpen((prev) => !prev);
   const handleClose = () => setOpen(false);
@@ -26,6 +27,23 @@ export default function GridMenuModal() {
       navigate("/loginpage"); // ルーティングに合わせて変更
     }
   };
+
+  // マウント時に ログイン情報を取得
+  useEffect(() => {
+    const stored = localStorage.getItem("jobnaviUser");
+    if (!stored) {
+      // 未ログイン → ログインページに戻す
+      navigate("/loginpage");
+      return;
+    }
+    try {
+      const user = JSON.parse(stored);
+      setRole(user.role); // "student" / "teacher" / "admin"
+    } catch (e) {
+      console.error(e);
+      navigate("/loginpage");
+    }
+  }, [navigate]);
 
   const handleClickStudent = () => {
     const stored = localStorage.getItem("jobnaviUser");
@@ -178,13 +196,15 @@ export default function GridMenuModal() {
             </div>
 
             {/* ⑤ 受験分析レポート（新規） */}
-            <div
-              className="grid-menu-card"
-              onClick={handleClickStudent}
-            >
-              <img className="grid-menu-img" src={reportImg} alt="受験分析レポート" />
-              <p className="grid-menu-text">受験分析レポート</p>
-            </div>
+            {(role === "admin" || role === "teacher") && (
+              <div
+                className="grid-menu-card"
+                onClick={handleClickStudent}
+              >
+                <img className="grid-menu-img" src={reportImg} alt="受験分析レポート" />
+                <p className="grid-menu-text">受験分析レポート</p>
+              </div>
+            )}
 
             <button
               type="button"
@@ -193,6 +213,7 @@ export default function GridMenuModal() {
             >
               Close
             </button>
+
 
             <span className="grid-menu-version">v1.1.0</span>
           </div>
