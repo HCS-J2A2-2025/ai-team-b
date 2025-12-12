@@ -1,10 +1,30 @@
-import React, { useEffect, useState } from "react";
+import  { useEffect, useState } from "react";
 import "../student.css";
+import { useNavigate } from "react-router-dom";
 
 function StudentPage() {
   const [data, setData] = useState(null);
   const [studentId, setStudentId] = useState("S20240001");
+  const [role, setRole] = useState(null);
   const [studentData, setStudentData] = useState(null);
+  const navigate = useNavigate();
+
+  // マウント時に ログイン情報を取得
+  useEffect(() => {
+    const stored = localStorage.getItem("jobnaviUser");
+    if (!stored) {
+      // 未ログイン → ログインページに戻す
+      navigate("/loginpage");
+      return;
+    }
+    try {
+      const user = JSON.parse(stored);
+      setRole(user.role); // "student" / "teacher" / "admin"
+    } catch (e) {
+      console.error(e);
+      navigate("/loginpage");
+    }
+  }, [navigate]);
 
   // JSON 読み込み
   useEffect(() => {
@@ -63,7 +83,7 @@ function StudentPage() {
         <ul>
           {(studentData["面接日程"] ?? []).map((d, idx) => (
             <li key={idx}>
-              <strong>{d["企業名"]}</strong>：  
+              <strong>{d["企業名"]}</strong>：
               {d.start_datetime
                 ? new Date(d.start_datetime).toLocaleString()
                 : "日時不明"}{" "}
