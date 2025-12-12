@@ -99,6 +99,7 @@ export default function GridMenuModal() {
         .grid-menu-text {
           font-size: 16px;
           font-weight: 500;
+          color: #000000ff;
         }
 
         .grid-menu-close-btn {

@@ -152,39 +152,39 @@ export default function Search() {
         }
     };
     const handleCompanyChange = async (e) => {
-    const value = e.target.value;
-    setCompany(value);
+        const value = e.target.value;
+        setCompany(value);
 
-    if (!value) {
-        setSuggestions([]);
-        return;
-    }
+        if (!value) {
+            setSuggestions([]);
+            return;
+        }
 
-    setIsSuggestLoading(true);
+        setIsSuggestLoading(true);
 
-    try {
-    const res = await fetch("http://localhost:8000/company_suggest", {
-        method: "POST",
-        headers: {
-        "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ keyword: value }),
-    });
+        try {
+            const res = await fetch("http://localhost:8000/company_suggest", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ keyword: value }),
+            });
 
-    if (!res.ok) {
-        console.error("候補取得に失敗しました", res.status);
-        setSuggestions([]);
-        return;
-    }
+            if (!res.ok) {
+                console.error("候補取得に失敗しました", res.status);
+                setSuggestions([]);
+                return;
+            }
 
-    const data = await res.json();
-    setSuggestions(data.candidates || []);
-    } catch (err) {
-    console.error("候補取得エラー:", err);
-    setSuggestions([]);
-    } finally {
-    setIsSuggestLoading(false);
-    }
+            const data = await res.json();
+            setSuggestions(data.candidates || []);
+        } catch (err) {
+            console.error("候補取得エラー:", err);
+            setSuggestions([]);
+        } finally {
+            setIsSuggestLoading(false);
+        }
     };
     const handleSuggestionClick = (name) => {
         setCompany(name);
@@ -196,6 +196,7 @@ export default function Search() {
         <>
             <style>{`
         html, body, #root {
+            overflow-x: hidden;   /* ← 横スクロールを強制的に無効化 */
             height: 100%;
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
             font-weight: 600; /* 全体を太字（検索以外） */
@@ -203,6 +204,7 @@ export default function Search() {
 
         .app-root {
             min-height: 100vh;
+            width: 100%;
             background-color: #ffffff;
             display: flex;
             flex-direction: column;
@@ -215,6 +217,7 @@ export default function Search() {
             display: flex;
             flex-direction: column;
             align-items: center;
+            width: 100%;
             justify-content: center;
             padding: 40px 0 80px;
             gap: 40px; /* 検索とアップロードの間隔 */
@@ -224,7 +227,10 @@ export default function Search() {
             font-size: 32px;
             font-weight: 700;
             margin-bottom: 40px;
+            text-align: center;   /* ← 必須 */
+            align-self: auto;     /* or 消す（推奨） */
         }
+
 
         /* 検索フォーム全体を中央に置く */
         .search-area {
@@ -237,9 +243,9 @@ export default function Search() {
 
         /* バー＋予測リストの共通幅をここで決める */
         .search-wrapper {
-            width: min(820px, 95vw);
+            width: min(760px, 95vw); /* ← 安全幅 */
+            margin: 0 auto;          /* ← 中央寄せ */
             display: flex;
-            flex-direction: column;
         }
         .search-input {
             flex: 1;
@@ -297,7 +303,7 @@ export default function Search() {
             transform: scale(0.95);
         }
         .suggest-panel {
-            width: 105.9%;
+            width: 100%; /* ← 必ず100%にする */
             margin-top: 0px;
             background-color: #ffffff;
             border-radius: 0 0 24px 24px;
@@ -309,6 +315,7 @@ export default function Search() {
             display: flex;
             flex-direction: column;
         }
+
         .suggest-row {
             display: flex;
             align-items: center;
@@ -519,51 +526,50 @@ export default function Search() {
                         <h1 className="main-title">JobNavi Inteligens</h1>
 
                         <form className="search-area" onSubmit={handleSubmit}>
-                        {/* 入力欄＋候補パネルをまとめる */}
-                        <div className="search-wrapper">
-                        <div
-                            className={`search-input-wrapper ${
-                            suggestions.length > 0 ? "has-suggest" : ""
-                            }`}
-                        >
-                            <span className="search-icon">🔍</span>
-
-                            <input
-                            type="text"
-                            className="search-input"
-                            placeholder="会社名を記入　 例）ダイアモンドヘッド"
-                            value={company}
-                            onChange={handleCompanyChange}
-                            />
-                        </div>
-
-                        {suggestions.length > 0 && (
-                            <div className="suggest-panel">
-                            {isSuggestLoading && (
-                                <div className="suggest-loading">検索中...</div>
-                            )}
-
-                            {suggestions.map((name) => (
+                            {/* 入力欄＋候補パネルをまとめる */}
+                            <div className="search-wrapper">
                                 <div
-                                key={name}
-                                className="suggest-row"
-                                onClick={() => handleSuggestionClick(name)}
+                                    className={`search-input-wrapper ${suggestions.length > 0 ? "has-suggest" : ""
+                                        }`}
                                 >
-                                <span className="suggest-icon">⏺</span>
-                                <span className="suggest-text">{name}</span>
-                                </div>
-                            ))}
-                            </div>
-                        )}
-                        </div>
+                                    <span className="search-icon">🔍</span>
 
-                        <button
-                            type="submit"
-                            className="search-button"
-                            disabled={isSubmitting}
-                        >
-                            {isSubmitting ? "検索中..." : "検　索"}
-                        </button>
+                                    <input
+                                        type="text"
+                                        className="search-input"
+                                        placeholder="会社名を記入　 例）ダイアモンドヘッド"
+                                        value={company}
+                                        onChange={handleCompanyChange}
+                                    />
+                                </div>
+
+                                {suggestions.length > 0 && (
+                                    <div className="suggest-panel">
+                                        {isSuggestLoading && (
+                                            <div className="suggest-loading">検索中...</div>
+                                        )}
+
+                                        {suggestions.map((name) => (
+                                            <div
+                                                key={name}
+                                                className="suggest-row"
+                                                onClick={() => handleSuggestionClick(name)}
+                                            >
+                                                <span className="suggest-icon">⏺</span>
+                                                <span className="suggest-text">{name}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </div>
+
+                            <button
+                                type="submit"
+                                className="search-button"
+                                disabled={isSubmitting}
+                            >
+                                {isSubmitting ? "検索中..." : "検　索"}
+                            </button>
                         </form>
 
                     </section>
@@ -588,14 +594,7 @@ export default function Search() {
                                 </p>
 
 
-                                <button
-                                    type="button"
-                                    className="upload-browse-button"
-                                    onClick={() => handleCsvUpload(selectedFile)}
-                                    disabled={!selectedFile}
-                                >
-                                    アップロード
-                                </button>
+
                                 {selectedFile && (
                                     <div className="upload-file-wrapper">
                                         <span>{selectedFile.name}</span>
@@ -627,6 +626,14 @@ export default function Search() {
                                     onChange={handleFileUpload}
                                 />
                             </div>
+                            <button
+                                type="button"
+                                className="upload-browse-button"
+                                onClick={() => handleCsvUpload(selectedFile)}
+                                disabled={!selectedFile}
+                            >
+                                アップロード
+                            </button>
                         </section>
                     )}
                 </main>
