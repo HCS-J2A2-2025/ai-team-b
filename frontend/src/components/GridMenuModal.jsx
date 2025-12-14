@@ -7,6 +7,7 @@ import sonsonImg from "../assets/sonson.png";
 import passwordImg from "../assets/password.png";
 import inteligensImg from "../assets/inteligens.png";
 import reportImg from "../assets/report.png";
+import analysisImg from "../assets/analysisButton.png";
 
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
@@ -27,7 +28,30 @@ export default function GridMenuModal() {
       navigate("/loginpage"); // ルーティングに合わせて変更
     }
   };
+  const handleClickAnalysis = () => {
+    const stored = localStorage.getItem("jobnaviUser");
+    setOpen(false);
 
+    if (!stored) {
+      navigate("/loginpage");
+      return;
+    }
+
+    try {
+      const user = JSON.parse(stored);
+
+      // teacher/admin 以外は弾く（UI側の認可）
+      if (user.role !== "teacher" && user.role !== "admin") {
+        alert("権限がありません。");
+        navigate("/loginpage");
+        return;
+      }
+      navigate("/followup");
+    } catch (e) {
+      console.error(e);
+      navigate("/loginpage");
+    }
+  };
   // マウント時に ログイン情報を取得
   useEffect(() => {
     const stored = localStorage.getItem("jobnaviUser");
@@ -205,7 +229,16 @@ export default function GridMenuModal() {
                 <p className="grid-menu-text">受験分析レポート</p>
               </div>
             )}
-
+            {/* ⑥ 就活フォロー分析（新規） */}
+            {(role === "admin" || role === "teacher")&& (
+              <div
+                className="grid-menu-card"
+                onClick={handleClickAnalysis}
+              >
+                <img className="grid-menu-img" src={analysisImg} alt="就活フォロー分析" />
+                <p className="grid-menu-text">就活フォロー分析</p>
+                </div>
+              )}
             <button
               type="button"
               className="grid-menu-close-btn"

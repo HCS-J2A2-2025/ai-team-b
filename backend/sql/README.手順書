@@ -1,0 +1,204 @@
+「家であなたが実際にやった流れ」をそのまま学校でも再現できるように、
+コマンド主体・確認ポイント付きの手順書としてまとめます。
+（コピペで進められる実務用です）
+
+🧭 学校PC用 手順書
+
+DockerでPostgresを立て、家と同じ接続情報で使う
+
+前提（この手順書のゴール）
+
+最終的に、学校PCで以下が すべて一致している状態にします。
+
+項目	値
+名前	DB
+パスワード　apppass
+
+host	127.0.0.1
+port	5432
+database appdb
+user	appuser
+
+
+そして、powershellで
+
+psql -f backend/sql/99_check.sql
+
+
+が エラーなく通るところまで。
+
+① Docker Desktop をインストール
+1. ダウンロード
+
+公式：
+
+https://www.docker.com/products/docker-desktop/
+
+2. インストール
+
+Windows 用 Docker Desktop
+
+途中で
+
+「WSL2 を有効化しますか？」→ はい
+
+管理者権限を求められたら 許可
+
+3. 再起動（指示されたら必ず）
+② Docker Desktop が動いているか確認
+
+PowerShell を開いて：
+
+docker version
+
+
+👉 Client と Server の両方が表示されればOK
+
+docker ps
+
+
+👉 エラーが出なければOK（まだ何も表示されなくて正常）
+
+③ プロジェクト直下に docker-compose.yml を作る
+
+あなたの Git プロジェクト（例：ai-team-b）直下で：
+
+ai-team-b/
+├─ backend/
+├─ docker-compose.yml  ←ここ
+
+docker-compose.yml（そのままコピペ）
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: appdb-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppass
+      TZ: Asia/Tokyo
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+
+
+※ パスワード apppass は 学校・家で同じにするのが楽
+
+④ Postgres コンテナを起動
+
+プロジェクト直下で：
+
+docker compose up -d
+
+
+確認：
+
+docker ps
+
+
+👇 こう出ればOK（例）
+
+CONTAINER ID   IMAGE         PORTS                    NAMES
+xxxxxx         postgres:16   0.0.0.0:5432->5432/tcp   appdb-postgres
+
+⑤ psql で DB に入れるか確認
+1. psql が入っていない場合
+
+PostgreSQL公式から Clientだけ入れてOK
+（家と同じでOK）
+
+2. 接続確認（あなたが実際にやった形）
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" `
+  -h 127.0.0.1 `
+  -p 5432 `
+  -U appuser `
+  -d appdb
+
+
+パスワード：
+
+apppass
+
+
+プロンプトが
+
+appdb=#
+
+
+になれば 成功
+
+⑥ SQL手順書（Git管理しているもの）を流す
+
+psql の中で：
+
+\i backend/sql/01_schema_migration.sql
+\i backend/sql/02_report_t_8cols_migration.sql
+\i backend/sql/03_index_report_t.sql
+\i backend/sql/99_check.sql
+
+
+または PowerShell から一発：
+
+& "C:\Program Files\PostgreSQL\18\bin\psql.exe" `
+  -h 127.0.0.1 `
+  -p 5432 `
+  -U appuser `
+  -d appdb `
+  -f backend/sql/99_check.sql
+
+
+👉 エラーが出なければ DB構築完了
+
+⑦ FastAPI を家と同じ設定で起動
+
+FastAPI 側の DB 設定は 変更不要。
+
+例（環境変数 or 設定ファイル）：
+
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_NAME=appdb
+DB_USER=appuser
+DB_PASSWORD=apppass
+
+
+起動：
+
+uvicorn main:app --reload
+
+⑧ 動作確認（最終チェック）
+SELECT COUNT(*) FROM report_t;
+
+SELECT COUNT(*) FROM user_m;
+
+SELECT COUNT(*) FILTER (WHERE u.user_no IS NOT NULL) AS matched
+FROM report_t r
+LEFT JOIN user_m u ON u.user_no = r.user_no;
+
+
+すべて通れば 家と学校は完全に同一環境。
+
+🧠 なぜこの手順は「学校でも安全」か
+
+Dockerで OS差・設定差を吸収
+
+接続情報が 完全一致
+
+SQLは Git管理で再現性100%
+
+VSCode拡張に依存しない
+
+まとめ（超重要）
+
+✅ この手順書は 学校でもそのまま使える
+
+✅ 家と学校で DB構成が完全一致
+
+✅ トラブル時は「docker compose down → up」で復旧可能

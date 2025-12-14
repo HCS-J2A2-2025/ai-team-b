@@ -5,12 +5,12 @@ from pydantic import BaseModel
 import pandas as pd
 from company_summary_batch import generate_detailed_report
 from csv_api import router as csv_router
-
+from followup.api import router as followup_router
 
 app = FastAPI()
 
 app.include_router(csv_router)
-
+app.include_router(followup_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000"],

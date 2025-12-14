@@ -3,3 +3,7 @@ uvicorn
 pandas
 requests
 python-multipart
+psycopg2-binary
+numpy
+python-dotenv
+pydantic
