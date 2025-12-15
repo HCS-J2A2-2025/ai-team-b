@@ -1,47 +1,52 @@
-/* Styles extracted from Result.jsx */
+/* =========================
+   Result.css（完全版）
+   - 検索バー＆サジェスト：あなたの参考CSS準拠
+   - 2カラム＋カード：崩れにくい版
+========================= */
 
+/* ===== responsive (search row) ===== */
 @media (max-width: 750px) {
   .result-search-row {
     flex-direction: column;
     align-items: stretch;
     gap: 12px;
   }
-
   .result-search-button {
     width: 100%;
   }
 }
 
+/* ===== loading spinner ===== */
 .loading-spinner {
   width: 32px;
   height: 32px;
   border-radius: 50%;
   border: 4px solid #e0e0e0;
   border-top-color: #1a73e8;
-  /* 青いリング */
   animation: spin 0.8s linear infinite;
 }
-
 @keyframes spin {
   to {
     transform: rotate(360deg);
   }
 }
 
-/* Container and layout styles */
+/* ===== base ===== */
 .result-container {
   min-height: 100vh;
   background-color: #f5f5f5;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
+    "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
 }
 
 .result-main-content {
   max-width: 1400px;
   margin: 0 auto;
   padding: 24px 16px 40px;
+  box-sizing: border-box;
 }
 
-/* Search area */
+/* ===== search area ===== */
 .result-search-area {
   display: flex;
   flex-direction: column;
@@ -68,13 +73,16 @@
   box-sizing: border-box;
 }
 
+/* 入力＋サジェスト全体のラッパ */
 .result-search-wrapper {
   width: min(820px, 95vw);
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
+  position: relative; /* サジェストを重ねるため */
 }
 
+/* input 本体（参考CSS準拠） */
 .result-search-input-wrapper {
   width: 100%;
   border-radius: 24px;
@@ -87,56 +95,10 @@
   box-sizing: border-box;
 }
 
-/* When suggestions are present, square off bottom corners */
+/* suggestions 表示中は下だけ四角く */
 .result-search-input-wrapper-has-suggest {
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
-}
-
-/* Suggest panel and rows */
-.result-suggest-panel {
-  width: 100%;
-  margin-top: 0px;
-  background-color: #ffffff;
-  border-radius: 0 0 24px 24px;
-  border: 1px solid #e0e0e0;
-  border-top: none;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
-  overflow: hidden;
-  max-height: 320px;
-  display: flex;
-  flex-direction: column;
-  z-index: 1;
-  box-sizing: border-box;
-}
-
-.result-suggest-loading {
-  padding: 8px 20px;
-  font-size: 12px;
-  color: #777;
-}
-
-.result-suggest-row {
-  display: flex;
-  align-items: center;
-  padding: 10px 20px;
-  gap: 12px;
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.result-suggest-row:hover {
-  background-color: #f8f9fa;
-}
-
-.result-suggest-icon {
-  font-size: 12px;
-  color: #8a8a8a;
-}
-
-.result-suggest-text {
-  flex: 1;
-  color: #202124;
 }
 
 .result-search-icon {
@@ -154,7 +116,7 @@
   background: transparent;
 }
 
-/* Search button */
+/* search button（参考CSS準拠） */
 .result-search-button {
   min-width: 160px;
   padding: 10px 40px;
@@ -162,8 +124,8 @@
   border: 1px solid #00b400;
   background-color: #11ff11;
   font-size: 18px;
-  font-weight: 400;
-  letter-spacing: 0.3em;
+  font-weight: 600; /* 少し読みやすく */
+  letter-spacing: 0.25em; /* 広すぎない */
   color: #ffffff;
   cursor: pointer;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
@@ -171,12 +133,74 @@
   opacity: 1;
 }
 
-/* Reduced opacity when loading */
+.result-search-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
 .result-search-button-loading {
   opacity: 0.7;
 }
 
-/* Layout for cards */
+/* ===== suggest panel（参考CSS準拠＋button対策） ===== */
+.result-suggest-panel {
+  width: 100%;
+  margin-top: 0px;
+  background-color: #ffffff;
+  border-radius: 0 0 24px 24px;
+  border: 1px solid #e0e0e0;
+  border-top: none;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+  overflow: hidden;
+  max-height: 320px;
+  display: flex;
+  flex-direction: column;
+  z-index: 10;
+  box-sizing: border-box;
+
+  /* input直下にくっつける */
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+}
+
+.result-suggest-loading {
+  padding: 8px 20px;
+  font-size: 12px;
+  color: #777;
+}
+
+/* ここは JSX が <button> なので「ボタン見た目消す」 */
+.result-suggest-row {
+  display: flex;
+  align-items: center;
+  padding: 10px 20px;
+  gap: 12px;
+  font-size: 14px;
+  cursor: pointer;
+
+  width: 100%;
+  border: none;
+  background: transparent;
+  text-align: left;
+}
+
+.result-suggest-row:hover {
+  background-color: #f8f9fa;
+}
+
+.result-suggest-icon {
+  font-size: 12px;
+  color: #8a8a8a;
+}
+
+.result-suggest-text {
+  flex: 1;
+  color: #202124;
+}
+
+/* ===== cards layout ===== */
 .result-content-grid {
   display: flex;
   flex-wrap: wrap;
@@ -190,18 +214,25 @@
   padding: 30px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
   border: 1px solid #e8e8e8;
-  flex: 1 1 320px;
-  min-width: 280px;
+  flex: 1 1 420px;     /* ← 横並びになりやすく */
+  min-width: 360px;    /* ← 2カラム維持 */
   max-width: 100%;
+  box-sizing: border-box;
 }
 
-/* AI report */
+@media (max-width: 900px) {
+  .result-card {
+    min-width: 100%;
+  }
+}
+
+/* ===== AI report ===== */
 .result-ai-report-header {
   display: flex;
   align-items: center;
   gap: 10px;
-  margin-bottom: 30px;
-  padding-bottom: 15px;
+  margin-bottom: 18px;
+  padding-bottom: 12px;
   border-bottom: 2px solid #f0f0f0;
 }
 
@@ -218,17 +249,17 @@
 
 .result-report-body {
   font-size: 14px;
-  line-height: 1.7;
+  line-height: 1.75;
   color: #555;
   white-space: pre-wrap;
 }
 
-/* Exam records */
+/* ===== exam records ===== */
 .result-exam-records-title {
   font-size: 18px;
   font-weight: 700;
   color: #333;
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .result-records-list {
@@ -242,6 +273,7 @@
   border-radius: 8px;
   overflow: hidden;
   transition: all 0.2s ease;
+  background: #fff;
 }
 
 .result-record-button {
@@ -288,7 +320,6 @@
   border-radius: 12px;
 }
 
-/* Chevron icon */
 .result-chevron-icon {
   width: 20px;
   height: 20px;
@@ -296,14 +327,13 @@
   transition: transform 0.3s ease;
   flex-shrink: 0;
 }
-
 .result-chevron-rotated {
   transform: rotate(180deg);
 }
 
-/* Record detail */
+/* ===== record detail ===== */
 .result-record-detail {
-  padding: 20px;
+  padding: 18px 20px;
   background-color: #f9f9f9;
   border-top: 1px solid #e8e8e8;
   font-size: 13px;
@@ -311,7 +341,44 @@
   line-height: 1.6;
 }
 
-/* Loading overlay */
+.result-detail-section-title {
+  font-weight: 700;
+  color: #444;
+  margin: 10px 0 8px;
+  font-size: 13px;
+}
+
+.result-q-line {
+  color: #1e3a8a;
+  margin-bottom: 4px;
+  line-height: 1.8;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+.result-memo-box {
+  background: #fff6d6;
+  border-left: 4px solid #f1c40f;
+  padding: 10px 12px;
+  border-radius: 6px;
+  margin-top: 8px;
+  color: #555;
+  white-space: pre-wrap;
+  font-size: 13px;
+}
+
+/* ===== misc ===== */
+.result-muted {
+  font-size: 13px;
+  color: #777;
+}
+
+.result-error {
+  font-size: 13px;
+  color: #d32f2f;
+}
+
+/* ===== overlay ===== */
 .result-overlay {
   position: fixed;
   inset: 0;
@@ -339,9 +406,12 @@
   letter-spacing: 0.03em;
 }
 
-/* API error message */
+/* ===== api error ===== */
 .result-api-error {
-  margin-bottom: 16px;
+  width: 100%;
+  max-width: 900px;
+  margin-top: 8px;
+  margin-bottom: 0;
   color: #d32f2f;
   font-size: 14px;
 }

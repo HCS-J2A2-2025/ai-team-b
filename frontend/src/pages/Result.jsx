@@ -1,135 +1,225 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
-import '../css/Result.css';
+import "../css/Result.css";
 
 export default function Result() {
   const location = useLocation();
 
   const initialCompanyName =
-    location.state?.companyName || "会社名が入力されてません";
-  const initialReport = location.state?.report || "";
+    location.state?.companyName || "会社名が入力されていません";
 
   const [fixedCompanyName, setFixedCompanyName] = useState(initialCompanyName);
   const [expandedItem, setExpandedItem] = useState(null);
   const [searchQuery, setSearchQuery] = useState(initialCompanyName);
-  const [report, setReport] = useState(initialReport);
+
+  const [report, setReport] = useState("");
+  const [records, setRecords] = useState([]);
+
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
   const [isSuggestLoading, setIsSuggestLoading] = useState(false);
   const [apiError, setApiError] = useState(null);
 
-  const examRecords = [
-    {
-      id: 1,
-      title: "一次面接",
-      year: "2024年",
-      term: "学部4年",
-      status: "合格",
-      type: "オンライン",
-    },
-    {
-      id: 2,
-      title: "二次面接",
-      year: "2024年",
-      term: "学部3年",
-      status: "合格",
-      type: "対面",
-    },
-    {
-      id: 3,
-      title: "最終面接",
-      year: "2023年",
-      term: "学部4年",
-      status: "合格",
-      type: "オンライン",
-    },
-  ];
-
-  const toggleExpand = (id) => {
-    setExpandedItem(expandedItem === id ? null : id);
-  };
+  const [detailsMap, setDetailsMap] = useState({});
+  const [detailLoadingMap, setDetailLoadingMap] = useState({});
+  const [detailErrorMap, setDetailErrorMap] = useState({});
 
   const handleLogout = () => {
     console.log("ログアウトしました");
   };
 
-  // 再検索 => POST /company
+  const getReportId = (record, idx) =>
+    record?.report_id ||
+    record?.reportId ||
+    record?.id ||
+    record?.レポートID ||
+    String(idx);
+
+  const getFallbackQuestionsFromRecord = (record) => {
+    if (!record) return [];
+    if (Array.isArray(record.questions) && record.questions.length > 0) {
+      return record.questions;
+    }
+    if (
+      typeof record.question_content === "string" &&
+      record.question_content.trim()
+    ) {
+      return [record.question_content.trim()];
+    }
+    return [];
+  };
+
+  const getFallbackMemoFromRecord = (record) =>
+    typeof record?.memo === "string" && record.memo.trim() ? record.memo : "";
+
+
+const fetchCompanyReport = async (companyName) => {
+  const name = (companyName || "").trim();
+  if (!name) return;
+
+  setIsLoading(true);
+  setApiError(null);
+  setExpandedItem(null);
+
+  setDetailsMap({});
+  setDetailLoadingMap({});
+  setDetailErrorMap({});
+
+  try {
+  // ① POST：request_id だけ返る
+  const res = await fetch("http://localhost:8000/api/company/report", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name }),
+  });
+
+  const postData = await res.json().catch(() => ({}));
+
+  if (!res.ok || postData?.error) {
+    setReport("");
+    setRecords([]);
+    setApiError(postData?.error || `取得に失敗しました（HTTP ${res.status}）`);
+    return;
+  }
+
+  const requestId = postData?.request_id;
+  if (!requestId) {
+    setReport("");
+    setRecords([]);
+    setApiError("request_id が返ってきませんでした（サーバー実装を確認）");
+    return;
+  }
+
+  // ② POST：本体データを取得（GET → POST に変更）
+  const res2 = await fetch("http://localhost:8000/api/company/report/result", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ request_id: requestId }),
+  });
+
+  const data = await res2.json().catch(() => ({}));
+
+  if (!res2.ok || data?.error) {
+    setReport("");
+    setRecords([]);
+    setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
+    return;
+  }
+
+  // ✅ 画面に反映
+  setFixedCompanyName(name);
+  setReport(data.report || "");
+
+  const all = Array.isArray(data.interviews) ? data.interviews : [];
+  setRecords(all.slice(-10));
+} catch (e) {
+  setReport("");
+  setRecords([]);
+  setApiError("API 接続エラー：サーバーに接続できませんでした");
+} finally {
+  setIsLoading(false);
+}
+};
+
+
+  const fetchInterviewDetail = async (idx, record) => {
+  const reportId = getReportId(record, idx);
+  if (detailsMap[reportId]) return;
+
+  setDetailLoadingMap((p) => ({ ...p, [reportId]: true }));
+  setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
+
+  try {
+      const res = await fetch("http://localhost:8000/api/interview/detail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ report_id: reportId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok || data?.error) {
+        setDetailErrorMap((p) => ({
+          ...p,
+          [reportId]: data?.error || `HTTP ${res.status}`,
+        }));
+      } else {
+        setDetailsMap((p) => ({ ...p, [reportId]: data }));
+      }
+    } catch (e) {
+      setDetailErrorMap((p) => ({
+        ...p,
+        [reportId]: "詳細の取得に失敗しました",
+      }));
+    } finally {
+      setDetailLoadingMap((p) => ({ ...p, [reportId]: false }));
+    }
+  };
+
+  const toggleExpand = async (idx) => {
+    const willOpen = expandedItem !== idx;
+    setExpandedItem(willOpen ? idx : null);
+
+    if (!willOpen) return;
+
+    const record = records[idx];
+    if (!record) return;
+
+    await fetchInterviewDetail(idx, record);
+  };
+
   const handleSearchInputChange = async (e) => {
     const value = e.target.value;
     setSearchQuery(value);
 
-    if (!value) {
+    if (!value.trim()) {
       setSuggestions([]);
       return;
     }
+
     setIsSuggestLoading(true);
     try {
       const res = await fetch("http://localhost:8000/company_suggest", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ keyword: value }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ q: value, keyword: value }),
       });
 
       if (!res.ok) {
-        console.error("候補取得に失敗しました", res.status);
         setSuggestions([]);
         return;
       }
 
       const data = await res.json();
-      setSuggestions(data.candidates || []);
-    } catch (err) {
-      console.error("候補取得エラー:", err);
+      const list = data?.candidates || data?.suggestions || [];
+      setSuggestions(Array.isArray(list) ? list : []);
+    } catch {
       setSuggestions([]);
     } finally {
       setIsSuggestLoading(false);
     }
   };
-  // ▼ 候補クリックで検索欄に反映
+
   const handleSuggestionClick = (name) => {
     setSearchQuery(name);
     setSuggestions([]);
   };
 
-  // 再検索 => POST /company
   const handleSearchSubmit = async (e) => {
     e.preventDefault();
-    if (!searchQuery.trim() || isLoading) return;
-
-    setIsLoading(true);
-    setApiError(null);
-    setReport("");
-    try {
-      const res = await fetch("http://localhost:8000/company", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ name: searchQuery }),
-      });
-      if (!res.ok) {
-        setApiError(`AI要約レポートの再生成に失敗しました（HTTP ${res.status}）`);
-        return;
-      }
-      const data = await res.json();
-
-      if (data.error) {
-        setApiError(data.error || "企業が見つかりません");
-        return;
-      }
-      const searchedName = searchQuery.trim();
-      setFixedCompanyName(searchedName);
-      setReport(data.report || "");
-    } catch (error) {
-      setApiError("API 接続エラー：サーバーに接続できませんでした");
-    } finally {
-      setIsLoading(false);
-    }
+    if (isLoading) return;
+    setSuggestions([]);
+    await fetchCompanyReport(searchQuery);
   };
-  // Determine dynamic classes based on component state
+
+  useEffect(() => {
+    if (initialCompanyName !== "会社名が入力されていません") {
+      fetchCompanyReport(initialCompanyName);
+    }
+    // eslint-disable-next-line
+  }, []);
+
   const searchInputWrapperClass =
     suggestions.length > 0
       ? "result-search-input-wrapper result-search-input-wrapper-has-suggest"
@@ -140,96 +230,122 @@ export default function Result() {
     : "result-search-button";
 
   return (
-    <>
-      <div className="result-container">
-        <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
+    <div className="result-container">
+      <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
 
-        <main className="result-main-content">
-          {isLoading && (
-            <div className="result-overlay">
-              <div className="result-loading-box">
-                <div>AI要約レポートを再生成中です…</div>
-                <div className="loading-spinner"></div>
-              </div>
+      <main className="result-main-content">
+        {isLoading && (
+          <div className="result-overlay">
+            <div className="result-loading-box">
+              <div>AI要約レポートを取得中です…</div>
+              <div className="loading-spinner"></div>
             </div>
-          )}
-          {/* 再検索エリア */}
-          <section className="result-search-area">
-            <form className="result-search-form" onSubmit={handleSearchSubmit}>
-              <div className={`result-search-input-row result-search-row`}>
-                {/* 入力＋候補 */}
-                <div className="result-search-wrapper">
-                  <div className={searchInputWrapperClass}>
-                    <span className="result-search-icon">🔍</span>
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={handleSearchInputChange}
-                      placeholder="会社名を記入　例）ダイアモンドヘッド"
-                      className="result-search-input"
-                    />
-                  </div>
+          </div>
+        )}
 
-                  {suggestions.length > 0 && (
-                    <div className="result-suggest-panel">
-                      {isSuggestLoading && (
-                        <div className="result-suggest-loading">検索中...</div>
-                      )}
-                      {suggestions.map((name) => (
-                        <div
-                          key={name}
-                          className="result-suggest-row"
-                          onClick={() => handleSuggestionClick(name)}
-                        >
-                          <span className="result-suggest-icon">⏺</span>
-                          <span className="result-suggest-text">{name}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+        <section className="result-search-area">
+          <form className="result-search-form" onSubmit={handleSearchSubmit}>
+            <div className="result-search-input-row result-search-row">
+              <div className="result-search-wrapper">
+                <div className={searchInputWrapperClass}>
+                  <span className="result-search-icon">🔍</span>
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={handleSearchInputChange}
+                    placeholder="会社名を記入　例）ダイアモンドヘッド"
+                    className="result-search-input"
+                  />
                 </div>
 
-                <button type="submit" className={searchButtonClass}>
-                  {isLoading ? "検索中..." : "検　索"}
-                </button>
-              </div>
-            </form>
-            {apiError && (
-              <div className="result-api-error">
-                {apiError}
-              </div>
-            )}
-          </section>
-          {/* 結果カード */}
-          <div className="result-content-grid">
-            {/* 左カラム - AI要約レポート */}
-            <div className="result-card">
-              <div className="result-ai-report-header">
-                <span className="result-ai-icon">✨</span>
-                <h3 className="result-ai-report-title">
-                  {isLoading
-                  ? `AI要約レポート（${searchQuery.trim()}）`
-                  : `AI要約レポート（${fixedCompanyName}）`}
-                </h3>
+                {(isSuggestLoading || suggestions.length > 0) && (
+                  <div className="result-suggest-panel">
+                    {isSuggestLoading && (
+                      <div className="result-suggest-loading">検索中...</div>
+                    )}
+                    {suggestions.map((name) => (
+                      <button
+                        type="button"
+                        key={name}
+                        className="result-suggest-row"
+                        onClick={() => handleSuggestionClick(name)}
+                      >
+                        <span className="result-suggest-icon">⏺</span>
+                        <span className="result-suggest-text">{name}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <p className="result-report-body">
-                {report || "レポートがまだ取得されていません。しばらくお待ちください。"}
-              </p>
+              <button
+                type="submit"
+                className={searchButtonClass}
+                disabled={isLoading}
+              >
+                {isLoading ? "検索中..." : "検　索"}
+              </button>
+            </div>
+          </form>
+
+          {apiError && <div className="result-api-error">{apiError}</div>}
+        </section>
+
+        <div className="result-content-grid">
+          <div className="result-card">
+            <div className="result-ai-report-header">
+              <span className="result-ai-icon">✨</span>
+              <h3 className="result-ai-report-title">
+                AI要約レポート（{(searchQuery || fixedCompanyName || "").trim()}）
+              </h3>
             </div>
 
-            {/* 右カラム - 受験記録一覧（ダミー） */}
-            <div className="result-card">
-              <h3 className="result-exam-records-title">
-                受験記録一覧({examRecords.length}件)
-              </h3>
+            <p className="result-report-body">
+              {report || "レポートがまだ取得されていません。検索してください。"}
+            </p>
+          </div>
 
-              <div className="result-records-list">
-                {examRecords.map((record) => (
-                  <div key={record.id} className="result-record-item">
+          <div className="result-card">
+            <h3 className="result-exam-records-title">
+              受験記録一覧({records.length}件)
+            </h3>
+
+            <div className="result-records-list">
+              {records.length === 0 && !isLoading && (
+                <p className="result-muted">
+                  この企業の面接記録はまだ登録されていません。
+                </p>
+              )}
+
+              {records.map((record, idx) => {
+                const isOpen = expandedItem === idx;
+
+                const reportId = getReportId(record, idx);
+                const detail = detailsMap[reportId];
+                const isDetailLoading = !!detailLoadingMap[reportId];
+                const detailErr = detailErrorMap[reportId];
+
+                const displayQuestions =
+                  Array.isArray(detail?.questions) && detail.questions.length > 0
+                    ? detail.questions
+                    : getFallbackQuestionsFromRecord(record);
+
+                const displayMemo =
+                  typeof detail?.memo === "string" && detail.memo.trim()
+                    ? detail.memo
+                    : getFallbackMemoFromRecord(record);
+
+                const displayQuestionContent =
+                  typeof detail?.question_content === "string" &&
+                  detail.question_content.trim()
+                    ? detail.question_content
+                    : "";
+
+                return (
+                  <div key={`${reportId}-${idx}`} className="result-record-item">
                     <button
                       type="button"
-                      onClick={() => toggleExpand(record.id)}
+                      onClick={() => toggleExpand(idx)}
                       className="result-record-button"
                     >
                       <div className="result-record-info">
@@ -239,11 +355,17 @@ export default function Result() {
                         <span className="result-record-status">{record.status}</span>
                         <span className="result-record-meta">{record.type}</span>
                       </div>
+
                       <svg
-                        className={expandedItem === record.id ? `result-chevron-icon result-chevron-rotated` : `result-chevron-icon`}
+                        className={
+                          isOpen
+                            ? "result-chevron-icon result-chevron-rotated"
+                            : "result-chevron-icon"
+                        }
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
+                        aria-hidden="true"
                       >
                         <path
                           strokeLinecap="round"
@@ -254,18 +376,40 @@ export default function Result() {
                       </svg>
                     </button>
 
-                    {expandedItem === record.id && (
+                    {isOpen && (
                       <div className="result-record-detail">
-                        <p>詳細な面接内容や質問事項がここに表示されます。</p>
+                        {isDetailLoading && (
+                          <p className="result-muted">詳細を読み込み中...</p>
+                        )}
+                        {detailErr && <p className="result-error">{detailErr}</p>}
+
+                        <div className="result-detail-section-title">質問内容</div>
+
+                        {Array.isArray(displayQuestions) && displayQuestions.length > 0 ? (
+                          displayQuestions.map((q, i) => (
+                            <div key={i} className="result-q-line">
+                              {`Q${i + 1}. ${q}`}
+                            </div>
+                          ))
+                        ) : displayQuestionContent ? (
+                          <div className="result-q-line">{displayQuestionContent}</div>
+                        ) : (
+                          <div className="result-muted">質問が抽出できませんでした</div>
+                        )}
+
+                        <div className="result-detail-section-title">メモ・感想</div>
+                        <div className="result-memo-box">
+                          {displayMemo || "メモがありません"}
+                        </div>
                       </div>
                     )}
                   </div>
-                ))}
-              </div>
+                );
+              })}
             </div>
           </div>
-        </main>
-      </div>
-    </>
+        </div>
+      </main>
+    </div>
   );
 }
