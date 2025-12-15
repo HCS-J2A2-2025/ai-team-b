@@ -1,6 +1,7 @@
 import os
 import time
 import uuid
+import re
 import pandas as pd
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -66,7 +67,7 @@ class SuggestResponseCompat(BaseModel):
 
 class InterviewDetailRequest(BaseModel):
     report_id: str
-    
+
 class CompanyResultRequest(BaseModel):
     request_id: str
 
@@ -82,6 +83,12 @@ def _summary_csv_path() -> str:
 def load_summary_df() -> pd.DataFrame:
     return pd.read_csv(_summary_csv_path(), encoding="utf-8-sig")
 
+def _normalize_company_name(s: str) -> str:
+    return re.sub(r"\s+", "", s or "").strip()
+
+def _is_symbol_only(s: str) -> bool:
+    # 日本語・英数字が1文字も含まれない
+    return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
 
 # =========================
 # Report build (internal)
@@ -99,9 +106,17 @@ def _create_report(name: str, student_no: str | None = None):
     if "company_name" not in df.columns:
         return None, {"error": "company_summary_t.csv に company_name 列がありません"}
 
-    hit = df[df["company_name"].astype(str).str.contains(keyword, na=False, regex=False)]
+    # 正規化
+    norm_input = _normalize_company_name(keyword)
+
+    df = df.copy()
+    df["__norm_name"] = df["company_name"].astype(str).apply(_normalize_company_name)
+
+    # ③ 完全一致のみ許可
+    hit = df[df["__norm_name"] == norm_input]
+
     if hit.empty:
-        return None, {"error": f"企業 '{keyword}' が見つかりません"}
+        return None, {"error": "データに存在しません（完全一致が必要です）"}
 
     row = hit.iloc[0]
     company_name = str(row["company_name"]).strip()

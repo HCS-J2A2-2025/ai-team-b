@@ -2,6 +2,8 @@ import { useState, useEffect } from "react";
 import { useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import "../css/Result.css";
+// Use the same search styling as the Search page
+import "../css/Search.css";
 
 export default function Result() {
   const location = useLocation();
@@ -15,6 +17,7 @@ export default function Result() {
 
   const [report, setReport] = useState("");
   const [records, setRecords] = useState([]);
+  const [showLoading, setShowLoading] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -66,6 +69,8 @@ const fetchCompanyReport = async (companyName) => {
   setDetailsMap({});
   setDetailLoadingMap({});
   setDetailErrorMap({});
+  let timerId = null;
+  timerId = setTimeout(() => setShowLoading(true), 1000);
 
   try {
   // ① POST：request_id だけ返る
@@ -135,7 +140,9 @@ setRecords(list.slice(-10));
   setRecords([]);
   setApiError("API 接続エラー：サーバーに接続できませんでした");
 } finally {
-  setIsLoading(false);
+    clearTimeout(timerId);
+    setShowLoading(false);
+    setIsLoading(false);
 }
 };
 
@@ -146,7 +153,6 @@ setRecords(list.slice(-10));
 
   setDetailLoadingMap((p) => ({ ...p, [reportId]: true }));
   setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
-
   try {
       const res = await fetch("http://localhost:8000/api/interview/detail", {
         method: "POST",
@@ -237,21 +243,16 @@ setRecords(list.slice(-10));
     // eslint-disable-next-line
   }, []);
 
-  const searchInputWrapperClass =
-    suggestions.length > 0
-      ? "result-search-input-wrapper result-search-input-wrapper-has-suggest"
-      : "result-search-input-wrapper";
-
-  const searchButtonClass = isLoading
-    ? "result-search-button result-search-button-loading"
-    : "result-search-button";
+  // We no longer compute result‑specific class names for the search elements.
+  // The search bar and suggestion list now reuse the same classes from Search.css
+  // to ensure a consistent look across pages.
 
   return (
     <div className="result-container">
       <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
 
       <main className="result-main-content">
-        {isLoading && (
+        {showLoading && (
           <div className="result-overlay">
             <div className="result-loading-box">
               <div>AI要約レポートを取得中です…</div>
@@ -261,50 +262,50 @@ setRecords(list.slice(-10));
         )}
 
         <section className="result-search-area">
-          <form className="result-search-form" onSubmit={handleSearchSubmit}>
-            <div className="result-search-input-row result-search-row">
-              <div className="result-search-wrapper">
-                <div className={searchInputWrapperClass}>
-                  <span className="result-search-icon">🔍</span>
+          {/* Use the same structure and classes as the Search page */}
+          <form className="search-area" onSubmit={handleSearchSubmit}>
+              <div className="search-row">
+
+              {/* Input field and suggestions */}
+              <div className="search-wrapper">
+                <div
+                  className={`search-input-wrapper ${
+                    suggestions.length > 0 ? "has-suggest" : ""
+                  }`}
+                >
+                  <span className="search-icon">🔍</span>
                   <input
                     type="text"
+                    className="search-input"
+                    placeholder="会社名を記入　例）ダイアモンドヘッド"
                     value={searchQuery}
                     onChange={handleSearchInputChange}
-                    placeholder="会社名を記入　例）ダイアモンドヘッド"
-                    className="result-search-input"
                   />
                 </div>
-
-                {(isSuggestLoading || suggestions.length > 0) && (
-                  <div className="result-suggest-panel">
+                {suggestions.length > 0 && (
+                  <div className="suggest-panel">
                     {isSuggestLoading && (
-                      <div className="result-suggest-loading">検索中...</div>
+                      <div className="suggest-loading">検索中...</div>
                     )}
                     {suggestions.map((name) => (
-                      <button
-                        type="button"
+                      <div
                         key={name}
-                        className="result-suggest-row"
+                        className="suggest-row"
                         onClick={() => handleSuggestionClick(name)}
                       >
-                        <span className="result-suggest-icon">⏺</span>
-                        <span className="result-suggest-text">{name}</span>
-                      </button>
+                        <span className="suggest-icon">⏺</span>
+                        <span className="suggest-text">{name}</span>
+                      </div>
                     ))}
                   </div>
                 )}
               </div>
-
-              <button
-                type="submit"
-                className={searchButtonClass}
-                disabled={isLoading}
-              >
+              {/* Submit button */}
+              <button type="submit" className="search-button" disabled={isLoading}>
                 {isLoading ? "検索中..." : "検　索"}
               </button>
             </div>
           </form>
-
           {apiError && <div className="result-api-error">{apiError}</div>}
         </section>
 

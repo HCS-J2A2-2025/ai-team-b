@@ -52,7 +52,50 @@ body,
   /* バーとボタンの間隔 */
   width: 100%;
 }
+/* 横並び：検索バー + 検索ボタン */
+.search-row {
+  width: min(980px, 95vw);
+  /* ここで全体幅を決める */
+  margin: 0 auto;
+  display: flex;
+  align-items: flex-start;
+  /* ボタンを上に揃える（サジェストが下に伸びてもズレにくい） */
+  gap: 16px;
+  /* ← “少し間隔” */
+  justify-content: center;
+}
 
+.search-row .search-wrapper {
+  flex: 1;
+  /* 入力側を伸ばす */
+  width: auto;
+  /* 既存の width を上書き */
+  min-width: 360px;
+}
+
+.search-row .search-button {
+  margin-top: 0;
+  /* 既存の margin-top:8px を打ち消す */
+  align-self: flex-start;
+  white-space: nowrap;
+}
+
+/* スマホは縦に戻す（今まで通り使いやすい） */
+@media (max-width: 750px) {
+  .search-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .search-row .search-wrapper {
+    min-width: 0;
+  }
+
+  .search-row .search-button {
+    width: 100%;
+  }
+}
 /* バー＋予測リストの共通幅をここで決める */
 .search-wrapper {
   width: min(760px, 95vw);

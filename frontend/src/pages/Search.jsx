@@ -43,7 +43,7 @@ export default function Search() {
     setApiError(null);
 
     let timerId = null;
-    timerId = setTimeout(() => setShowSubmitting(true), 200); // ★200ms遅延
+    timerId = setTimeout(() => setShowSubmitting(true), 1000);
 
     try {
         const res = await fetch("http://localhost:8000/company", {
@@ -198,125 +198,125 @@ export default function Search() {
     return (
         <>
         <div className="app-root">
-        {/* 共通ヘッダー */}
-        <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
-        <main className="app-main">
-            {showSubmitting && (
-                <div className="loading-backdrop">
-                    <div className="loading-box">
-                        <div className="loading-text">
-                            AI要約レポートを生成しています…
-                        </div>
-                        <div className="loading-spinner" />
-                    </div>
-                </div>
-            )}
-            {/* 検索機能 */}
-            <section>
-                <h1 className="main-title">JobNavi Inteligens</h1>
-
-                <form className="search-area" onSubmit={handleSubmit}>
-                    {/* 入力欄＋候補パネルをまとめる */}
-                    <div className="search-wrapper">
-                        <div
-                            className={`search-input-wrapper ${suggestions.length > 0 ? "has-suggest" : ""
-                                }`}
-                        >
-                            <span className="search-icon">🔍</span>
-
-                            <input
-                                type="text"
-                                className="search-input"
-                                placeholder="会社名を記入　 例）ダイアモンドヘッド"
-                                value={company}
-                                onChange={handleCompanyChange}
-                            />
-                        </div>
-
-                        {suggestions.length > 0 && (
-                            <div className="suggest-panel">
-                                {isSuggestLoading && (
-                                    <div className="suggest-loading">検索中...</div>
-                                )}
-
-                                {suggestions.map((name) => (
-                                    <div
-                                        key={name}
-                                        className="suggest-row"
-                                        onClick={() => handleSuggestionClick(name)}
-                                    >
-                                        <span className="suggest-icon">⏺</span>
-                                        <span className="suggest-text">{name}</span>
-                                    </div>
-                                ))}
+            {/* 共通ヘッダー */}
+            <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
+            <main className="app-main">
+                {showSubmitting && (
+                    <div className="loading-backdrop">
+                        <div className="loading-box">
+                            <div className="loading-text">
+                                AI要約レポートを生成しています…
                             </div>
-                        )}
-                    </div>
-
-                    <button
-                        type="submit"
-                        className="search-button"
-                        disabled={isSubmitting}
-                    >
-                        {isSubmitting ? "検索中..." : "検　索"}
-                    </button>
-                </form>
-                {apiError && (
-                    <div style={{ marginTop: "16px", color: "#d32f2f", fontSize: "14px" }}>
-                        {apiError}
+                            <div className="loading-spinner" />
+                        </div>
                     </div>
                 )}
-            </section>
-            {role === "admin" && (//CSVアップロード欄（常に表示）
-                <section className="upload-section">
-                    <div className="upload-title">CSV一括登録（管理者用）</div>
+                {/* 検索機能 */}
+                <section>
+                    <h1 className="main-title">JobNavi Inteligens</h1>
 
-                    <div
-                        className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
-                        onClick={handleBrowseClick} // 全体クリックでも参照
-                    >
-                        <div className="upload-cloud" />
-                        <p className="upload-help-text">
-                            CSVファイルをここにドラッグ＆ドロップする<br />
-                        </p>
-                        {selectedFile && (
-                            <div className="upload-file-wrapper">
-                                <span>{selectedFile.name}</span>
-                                <button
-                                    type="button"
-                                    className="remove-file-button"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        removeSelectedFile();
-                                    }}
-                                >
-                                    ×
-                                </button>
+                    <form className="search-area" onSubmit={handleSubmit}>
+                        {/* 入力欄＋候補パネルをまとめる */}
+                        <div className="search-wrapper">
+                            <div
+                                className={`search-input-wrapper ${suggestions.length > 0 ? "has-suggest" : ""
+                                    }`}
+                            >
+                                <span className="search-icon">🔍</span>
+
+                                <input
+                                    type="text"
+                                    className="search-input"
+                                    placeholder="会社名を記入　 例）ダイアモンドヘッド"
+                                    value={company}
+                                    onChange={handleCompanyChange}
+                                />
                             </div>
-                        )}
-                        {/* 実際の input は隠す */}
-                        <input
-                            type="file"
-                            accept=".csv"
-                            ref={fileInputRef}
-                            style={{ display: 'none' }}
-                            onChange={handleFileUpload}
-                        />
-                    </div>
-                    <button
-                        type="button"
-                        className="upload-browse-button"
-                        onClick={() => handleCsvUpload(selectedFile)}
-                        disabled={!selectedFile}
-                    >
-                        アップロード
-                    </button>
+
+                            {suggestions.length > 0 && (
+                                <div className="suggest-panel">
+                                    {isSuggestLoading && (
+                                        <div className="suggest-loading">検索中...</div>
+                                    )}
+
+                                    {suggestions.map((name) => (
+                                        <div
+                                            key={name}
+                                            className="suggest-row"
+                                            onClick={() => handleSuggestionClick(name)}
+                                        >
+                                            <span className="suggest-icon">⏺</span>
+                                            <span className="suggest-text">{name}</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+
+                        <button
+                            type="submit"
+                            className="search-button"
+                            disabled={isSubmitting}
+                        >
+                            {isSubmitting ? "検索中..." : "検　索"}
+                        </button>
+                    </form>
+                    {apiError && (
+                        <div style={{ marginTop: "16px", color: "#d32f2f", fontSize: "14px" }}>
+                            {apiError}
+                        </div>
+                    )}
                 </section>
-            )}
-        </main>
+                {role === "admin" && (//CSVアップロード欄（常に表示）
+                    <section className="upload-section">
+                        <div className="upload-title">CSV一括登録（管理者用）</div>
+
+                        <div
+                            className={`upload-box ${isDragOver ? 'drag-over' : ''}`}
+                            onDragOver={handleDragOver}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleDrop}
+                            onClick={handleBrowseClick} // 全体クリックでも参照
+                        >
+                            <div className="upload-cloud" />
+                            <p className="upload-help-text">
+                                CSVファイルをここにドラッグ＆ドロップする<br />
+                            </p>
+                            {selectedFile && (
+                                <div className="upload-file-wrapper">
+                                    <span>{selectedFile.name}</span>
+                                    <button
+                                        type="button"
+                                        className="remove-file-button"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeSelectedFile();
+                                        }}
+                                    >
+                                        ×
+                                    </button>
+                                </div>
+                            )}
+                            {/* 実際の input は隠す */}
+                            <input
+                                type="file"
+                                accept=".csv"
+                                ref={fileInputRef}
+                                style={{ display: 'none' }}
+                                onChange={handleFileUpload}
+                            />
+                        </div>
+                        <button
+                            type="button"
+                            className="upload-browse-button"
+                            onClick={() => handleCsvUpload(selectedFile)}
+                            disabled={!selectedFile}
+                        >
+                            アップロード
+                        </button>
+                    </section>
+                )}
+            </main>
         </div>
         </>
     );
