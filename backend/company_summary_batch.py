@@ -475,10 +475,10 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     df_iv = df_iv.sort_values(["_student_key", "start_dt_obj"])
     df_iv["round_index"] = df_iv.groupby("_student_key").cumcount() + 1
 
-    # ★総回数（学籍番号ごと）
+    # 総回数（学籍番号ごと）
     total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
 
-    # 最新10人（各人の最新1件）を抜く
+    # 最新10人（各人の最新1件）
     latest_each_student = (
         df_iv.sort_values("start_dt_obj")
             .groupby("_student_key", as_index=False)
@@ -503,6 +503,9 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         if not report_id:
             report_id = f"{target_name}_{row.get(col_start,'')}_{i}"
 
+        # ★ public_id（外に出すID）
+        public_id = make_public_id(report_id)
+
         raw_text = str(row.get(col_text, "") or "")
         questions = extract_questions(raw_text, max_q=6)
 
@@ -515,24 +518,27 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
 
         title = calc_round_label(r_idx, total_rounds)
 
+        # ✅ 内部用：report_idは保持（後でdetailで逆引きに使う）
         records.append(
             {
-                "report_id": report_id,
+                "id": public_id,                 # ← 外に出す
+                "_report_id": report_id,         # ← 外に出さない（先頭_にして分かりやすく）
                 "student_no": str(row.get(col_student, "")).strip() if col_student in latest_each_student.columns else "",
                 "round_index": r_idx,
-                "total_rounds": total_rounds,  # デバッグ用に残す（不要なら消してOK）
+                "total_rounds": total_rounds,
                 "title": title,
                 "year": year_str,
                 "term": "",
                 "status": status_label,
                 "type": type_label,
-                "questions": questions,
-                "memo": memo,
+                "questions": questions,          # ← resultで返さないなら残してOK（内部用）
+                "memo": memo,                    # ← resultで返さないなら残してOK（内部用）
                 "start_datetime": str(row.get(col_start, "")),
             }
         )
 
     return records
+
 
 
 # ============================================================

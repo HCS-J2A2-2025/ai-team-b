@@ -194,6 +194,21 @@ def post_company_report_result(req: CompanyResultRequest):
         raise HTTPException(status_code=404, detail="not found or expired")
     return data
 
+    # ★ 最小限だけ返す
+    return {
+        "company": data["company"],
+        "records": [
+            {
+                "id": r["id"],          # public_id
+                "title": r["title"],
+                "year": r["year"],
+                "status": r["status"],
+                "type": r["type"],
+            }
+            for r in data.get("interviews", [])
+        ],
+    }
+
 
 # =========================
 # 互換: /company も同じ挙動にする（うっかり全文返し防止）
