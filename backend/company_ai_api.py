@@ -192,23 +192,30 @@ def post_company_report_result(req: CompanyResultRequest):
     data = _cache_get(req.request_id)
     if not data:
         raise HTTPException(status_code=404, detail="not found or expired")
-    return data
 
-    # ★ 最小限だけ返す
+    interviews = data.get("interviews") or []
+
     return {
-        "company": data["company"],
+        "company": data.get("company", ""),
+        "report": data.get("report", ""),
         "records": [
             {
-                "id": r["id"],          # public_id
-                "title": r["title"],
-                "year": r["year"],
-                "status": r["status"],
-                "type": r["type"],
+                "id": (r.get("id") or ""),   # public_id
+                "title": r.get("title", ""),
+                "year": r.get("year", ""),
+                "term": r.get("term", ""),
+                "status": r.get("status", ""),
+                "type": r.get("type", ""),
+                "start_datetime": r.get("start_datetime", ""),
+
+                # ★ 最短で詳細もここで返す（フロントの詳細API不要にできる）
+                "questions": r.get("questions", []),
+                "memo": r.get("memo", ""),
+                "question_content": r.get("question_content", ""),
             }
-            for r in data.get("interviews", [])
+            for r in interviews
         ],
     }
-
 
 # =========================
 # 互換: /company も同じ挙動にする（うっかり全文返し防止）

@@ -11,6 +11,29 @@ from collections import Counter
 
 import pandas as pd
 
+import hmac
+import hashlib
+import base64
+
+# ★ これを .env / 環境変数で必ず上書きする（dev用デフォルトは仮）
+PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
+
+def make_public_id(report_id: str) -> str:
+    """
+    内部の report_id を安全な公開用IDに変換する（復元不可）
+    - 同じ report_id → 常に同じ public_id
+    - SECRET が漏れない限り総当たりで推測されにくい
+    """
+    if not report_id:
+        return ""
+
+    msg = str(report_id).encode("utf-8")
+    key = PUBLIC_ID_SECRET.encode("utf-8")
+    digest = hmac.new(key, msg, hashlib.sha256).digest()
+
+    # URLでも安全な短めID
+    return base64.urlsafe_b64encode(digest[:16]).decode("utf-8").rstrip("=")
+
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
 INPUT_CSV = os.path.join(BASE_DIR, "data", "report_t_all.csv")

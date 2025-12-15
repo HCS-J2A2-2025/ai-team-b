@@ -30,6 +30,7 @@ export default function Result() {
   };
 
   const getReportId = (record, idx) =>
+    record?.id ||
     record?.report_id ||
     record?.reportId ||
     record?.id ||
@@ -109,10 +110,26 @@ const fetchCompanyReport = async (companyName) => {
 
   // ✅ 画面に反映
   setFixedCompanyName(name);
-  setReport(data.report || "");
 
-  const all = Array.isArray(data.interviews) ? data.interviews : [];
-  setRecords(all.slice(-10));
+const reportText =
+  data?.report ??
+  data?.result?.report ??
+  "";
+
+setReport(reportText);
+
+// ✅ どの形でも拾う
+const list =
+  (Array.isArray(data?.records) && data.records) ||
+  (Array.isArray(data?.interviews) && data.interviews) ||
+  (Array.isArray(data?.result?.records) && data.result.records) ||
+  (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
+  [];
+
+// ✅ ここで必ず件数確認できる
+console.log("records count:", list.length, "payload keys:", Object.keys(data || {}));
+
+setRecords(list.slice(-10));
 } catch (e) {
   setReport("");
   setRecords([]);
@@ -166,7 +183,7 @@ const fetchCompanyReport = async (companyName) => {
     const record = records[idx];
     if (!record) return;
 
-    await fetchInterviewDetail(idx, record);
+    //await fetchInterviewDetail(idx, record);
   };
 
   const handleSearchInputChange = async (e) => {
