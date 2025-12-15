@@ -2,21 +2,25 @@
    全体レイアウト
 ================================ */
 .student-page-root {
-  background: #f5f5f5;
+  background: #ffffff;
   padding: 40px 0 80px;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   align-items: center;
-  background-color: white;
 }
 
-/* ページタイトル */
+/* ================================
+   ページタイトル
+================================ */
 .page-title {
-  font-size: 28px;
+  font-size: clamp(20px, 4.5vw, 28px);
   font-weight: bold;
   margin-bottom: 20px;
   color: #333;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ================================
@@ -37,12 +41,14 @@
 .selector-card label {
   font-weight: 600;
   color: #444;
-  font-size: 16px;
+  font-size: clamp(13px, 3vw, 16px);
+  white-space: nowrap;
 }
 
-.selector-card select {
+.selector-card select,
+.selector-card .search-input {
   padding: 10px 14px;
-  font-size: 16px;
+  font-size: clamp(13px, 3vw, 16px);
   border: 1px solid #ccc;
   border-radius: 10px;
   background: #f9f9f9;
@@ -51,25 +57,38 @@
   transition: 0.2s ease;
 }
 
-.selector-card select:hover {
+.selector-card select:hover,
+.selector-card .search-input:hover {
   background: #f0f0f0;
 }
 
-.selector-card select:focus {
+.selector-card select:focus,
+.selector-card .search-input:focus {
   border-color: #ffd93d;
   box-shadow: 0 0 0 3px rgba(255, 217, 61, 0.3);
 }
 
-/* スマホ対応 */
-@media (max-width: 480px) {
-  .selector-card {
-    flex-direction: column;
-    align-items: flex-start;
-  }
+/* ================================
+   サジェストパネル
+================================ */
+.suggest-panel {
+  margin-top: 6px;
+  background: #ffffff;
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
 
-  .selector-card select {
-    width: 100%;
-  }
+.suggest-row {
+  padding: 10px 14px;
+  font-size: clamp(13px, 3vw, 15px);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.suggest-row:hover {
+  background: #f5f5f5;
 }
 
 /* ================================
@@ -84,12 +103,13 @@
 }
 
 .ai-title {
-  font-size: 22px;
+  font-size: clamp(16px, 3.5vw, 22px);
   color: #444;
   display: flex;
   align-items: center;
   gap: 8px;
   margin-bottom: 24px;
+  white-space: nowrap;
 }
 
 .ai-section {
@@ -97,12 +117,15 @@
 }
 
 .ai-section h4 {
-  font-size: 18px;
+  font-size: clamp(14px, 3vw, 18px);
   margin-bottom: 10px;
+  white-space: nowrap;
 }
 
 .ai-report p {
   margin-bottom: 6px;
+  font-size: clamp(13px, 2.8vw, 15px);
+  line-height: 1.6;
 }
 
 /* ================================
@@ -125,9 +148,11 @@
   display: flex;
   align-items: center;
   gap: 6px;
+  font-size: clamp(15px, 3.2vw, 18px);
+  white-space: nowrap;
 }
 
-/* 見出しアイコン（統一感アップ） */
+/* 見出しアイコン */
 .section-card h3::before,
 .section-card h4::before {
   content: "◆";
@@ -142,26 +167,29 @@
 .section-card li {
   margin-bottom: 8px;
   line-height: 1.5;
+  font-size: clamp(13px, 2.8vw, 15px);
 }
 
 .section-card .ai-report p {
   margin-bottom: 8px;
+  font-size: clamp(13px, 2.8vw, 15px);
 }
 
 /* ================================
-   スマホ最適化
+   スマホ最適化（レイアウトのみ）
 ================================ */
 @media (max-width: 480px) {
-  .page-title {
-    font-size: 24px;
+  .selector-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .selector-card select,
+  .selector-card .search-input {
+    width: 100%;
   }
 
   .section-card {
     padding: 22px 20px;
-  }
-
-  .section-card h3,
-  .section-card h4 {
-    font-size: 17px;
   }
 }
