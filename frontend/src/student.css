@@ -1,27 +1,167 @@
-.student-container {
-  padding: 20px;
-  max-width: 900px;
-  margin: auto;
-  font-family: "Segoe UI", sans-serif;
+/* ================================
+   全体レイアウト
+================================ */
+.student-page-root {
+  background: #f5f5f5;
+  padding: 40px 0 80px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background-color: white;
 }
 
-.section {
-  margin-bottom: 25px;
-  padding: 15px;
-  border-left: 4px solid #4a90e2;
-  background: #f8f9fa;
+/* ページタイトル */
+.page-title {
+  font-size: 28px;
+  font-weight: bold;
+  margin-bottom: 20px;
+  color: #333;
 }
 
-.selector select {
-  padding: 5px;
-  margin-left: 10px;
+/* ================================
+   学籍番号セレクター（カード化）
+================================ */
+.selector-card {
+  width: min(900px, 92vw);
+  background: #ffffff;
+  padding: 20px 24px;
+  border-radius: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  margin-bottom: 28px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.selector-card label {
+  font-weight: 600;
+  color: #444;
   font-size: 16px;
 }
 
-.ai-report {
-  white-space: pre-wrap;
-  background: #fff;
-  padding: 15px;
-  border-radius: 8px;
+.selector-card select {
+  padding: 10px 14px;
+  font-size: 16px;
   border: 1px solid #ccc;
+  border-radius: 10px;
+  background: #f9f9f9;
+  cursor: pointer;
+  outline: none;
+  transition: 0.2s ease;
+}
+
+.selector-card select:hover {
+  background: #f0f0f0;
+}
+
+.selector-card select:focus {
+  border-color: #ffd93d;
+  box-shadow: 0 0 0 3px rgba(255, 217, 61, 0.3);
+}
+
+/* スマホ対応 */
+@media (max-width: 480px) {
+  .selector-card {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .selector-card select {
+    width: 100%;
+  }
+}
+
+/* ================================
+   AIカード（旧デザイン互換）
+================================ */
+.ai-card {
+  width: min(900px, 92vw);
+  background: white;
+  padding: 32px;
+  border-radius: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+}
+
+.ai-title {
+  font-size: 22px;
+  color: #444;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.ai-section {
+  margin-bottom: 28px;
+}
+
+.ai-section h4 {
+  font-size: 18px;
+  margin-bottom: 10px;
+}
+
+.ai-report p {
+  margin-bottom: 6px;
+}
+
+/* ================================
+   共通カード（セクションごと）
+================================ */
+.section-card {
+  width: min(900px, 92vw);
+  background: #ffffff;
+  padding: 28px 32px;
+  border-radius: 16px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
+  margin-bottom: 28px;
+}
+
+.section-card h3,
+.section-card h4 {
+  margin-bottom: 16px;
+  font-weight: 600;
+  color: #444;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* 見出しアイコン（統一感アップ） */
+.section-card h3::before,
+.section-card h4::before {
+  content: "◆";
+  font-size: 12px;
+  color: #ff6600;
+}
+
+.section-card ul {
+  padding-left: 18px;
+}
+
+.section-card li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.section-card .ai-report p {
+  margin-bottom: 8px;
+}
+
+/* ================================
+   スマホ最適化
+================================ */
+@media (max-width: 480px) {
+  .page-title {
+    font-size: 24px;
+  }
+
+  .section-card {
+    padding: 22px 20px;
+  }
+
+  .section-card h3,
+  .section-card h4 {
+    font-size: 17px;
+  }
 }
