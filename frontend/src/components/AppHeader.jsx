@@ -6,7 +6,7 @@
         const navigate = useNavigate();
         const handleLogout = () => {
             localStorage.removeItem("jobnaviUser");
-            navigate("/loginpage");        // ログイン画面へ
+            navigate("/");        // ログイン画面へ
         };
     return (
     <>

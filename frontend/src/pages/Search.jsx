@@ -11,7 +11,8 @@ export default function Search() {
     const [selectedFile, setSelectedFile] = useState(null); // 選択中CSV
     const [isDragOver, setIsDragOver] = useState(false);    // ドラッグ中か
     const [role, setRole] = useState(null);
-    const [isSubmitting, setIsSubmitting] = useState(false); // 検索中フラグ
+    const [isSubmitting, setIsSubmitting] = useState(false);
+    const [showSubmitting, setShowSubmitting] = useState(false);
     const [apiError, setApiError] = useState(null);
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
@@ -21,7 +22,7 @@ export default function Search() {
         const stored = localStorage.getItem("jobnaviUser");
         if (!stored) {
             // 未ログイン → ログインページに戻す
-            navigate("/loginpage");
+            navigate("/");
             return;
         }
         try {
@@ -29,50 +30,52 @@ export default function Search() {
             setRole(user.role); // "student" / "teacher" / "admin"
         } catch (e) {
             console.error(e);
-            navigate("/loginpage");
+            navigate("/");
         }
     }, [navigate]);
 
     // 検索ボタン押したときに /result へ遷移 + 会社名を渡す
     const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (!company.trim() || isSubmitting) return;
+    e.preventDefault();
+    if (!company.trim() || isSubmitting) return;
 
-        setIsSubmitting(true);
-        setApiError(null);
-        try {
-            const res = await fetch("http://localhost:8000/company", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ name: company }),
-            });
-            if (!res.ok) {
-                // HTTP レベルで失敗（404 等）
-                setApiError(`AI要約レポートの生成に失敗しました（HTTP ${res.status}）`);
-                return; //遷移しない
-            }
-            const data = await res.json();
-            if (data.error) {
-                // バックエンド側がエラーを返した場合
-                setApiError(data.error || "AI要約レポートの生成中にエラーが発生しました");
-                return; // 遷移しない
-            }
-            const reportText = data.report || "";
-            navigate("/result", {
-                state: {
-                    companyName: company,
-                    report: reportText,
-                },
-            });
-        } catch (error) {
-            console.error(error);
-            setApiError("API 接続エラー：サーバーに接続できませんでした");
-        } finally {
-            setIsSubmitting(false);
+    setIsSubmitting(true);
+    setApiError(null);
+
+    let timerId = null;
+    timerId = setTimeout(() => setShowSubmitting(true), 200); // ★200ms遅延
+
+    try {
+        const res = await fetch("http://localhost:8000/company", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: company }),
+        });
+
+        if (!res.ok) {
+        setApiError(`AI要約レポートの生成に失敗しました（HTTP ${res.status}）`);
+        return;
         }
+
+        const data = await res.json();
+        if (data.error) {
+        setApiError(data.error || "AI要約レポートの生成中にエラーが発生しました");
+        return;
+        }
+
+        navigate("/result", {
+        state: { companyName: company, report: data.report || "" },
+        });
+    } catch (error) {
+        console.error(error);
+        setApiError("API 接続エラー：サーバーに接続できませんでした");
+    } finally {
+        clearTimeout(timerId);
+        setShowSubmitting(false);
+        setIsSubmitting(false);
+    }
     };
+
 
     const handleLogout = () => {
         console.log('ログアウトしました');
@@ -198,7 +201,7 @@ export default function Search() {
         {/* 共通ヘッダー */}
         <AppHeader title="JobNavi Inteligens" onLogout={handleLogout} />
         <main className="app-main">
-            {isSubmitting && (
+            {showSubmitting && (
                 <div className="loading-backdrop">
                     <div className="loading-box">
                         <div className="loading-text">

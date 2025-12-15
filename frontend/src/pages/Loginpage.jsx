@@ -67,7 +67,7 @@ export default function Loginpage() {
             navigate("/search");
         } else {
             // 未ログイン → ログイン画面へ（このコンポーネント自身）
-            navigate("/loginpage"); // ルーティングによっては "/login" などに変更
+            navigate("/"); // ルーティングによっては "/login" などに変更
         }
     };
 
@@ -79,7 +79,7 @@ export default function Loginpage() {
             navigate("/student");
         } else {
             // 未ログイン → ログイン画面へ（このコンポーネント自身）
-            navigate("/loginpage"); // ルーティングによっては "/login" などに変更
+            navigate("/"); // ルーティングによっては "/login" などに変更
         }
     };
     return (

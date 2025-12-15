@@ -25,7 +25,7 @@ export default function GridMenuModal() {
       navigate("/search");
     } else {
       // 未ログイン → ログイン画面へ
-      navigate("/loginpage"); // ルーティングに合わせて変更
+      navigate("/"); // ルーティングに合わせて変更
     }
   };
   const handleClickAnalysis = () => {
@@ -33,7 +33,7 @@ export default function GridMenuModal() {
     setOpen(false);
 
     if (!stored) {
-      navigate("/loginpage");
+      navigate("/");
       return;
     }
 
@@ -43,13 +43,13 @@ export default function GridMenuModal() {
       // teacher/admin 以外は弾く（UI側の認可）
       if (user.role !== "teacher" && user.role !== "admin") {
         alert("権限がありません。");
-        navigate("/loginpage");
+        navigate("/");
         return;
       }
       navigate("/followup");
     } catch (e) {
       console.error(e);
-      navigate("/loginpage");
+      navigate("/");
     }
   };
   // マウント時に ログイン情報を取得
@@ -57,7 +57,7 @@ export default function GridMenuModal() {
     const stored = localStorage.getItem("jobnaviUser");
     if (!stored) {
       // 未ログイン → ログインページに戻す
-      navigate("/loginpage");
+      navigate("/");
       return;
     }
     try {
@@ -65,7 +65,7 @@ export default function GridMenuModal() {
       setRole(user.role); // "student" / "teacher" / "admin"
     } catch (e) {
       console.error(e);
-      navigate("/loginpage");
+      navigate("/");
     }
   }, [navigate]);
 
@@ -78,7 +78,7 @@ export default function GridMenuModal() {
       navigate("/student");
     } else {
       // 未ログイン → ログイン画面へ（このコンポーネント自身）
-      navigate("/loginpage"); // ルーティングによっては "/login" などに変更
+      navigate("/"); // ルーティングによっては "/login" などに変更
     }
   };
   return (

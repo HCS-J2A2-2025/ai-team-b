@@ -31,19 +31,19 @@ export default function FollowupDashboard() {
   useEffect(() => {
     const stored = localStorage.getItem("jobnaviUser");
     if (!stored) {
-      navigate("/loginpage");
+      navigate("/");
       return;
     }
 
     try {
       const u = JSON.parse(stored);
       if (u.role !== "teacher" && u.role !== "admin") {
-        navigate("/loginpage");
+        navigate("/");
         return;
       }
       setRole(u.role);
     } catch {
-      navigate("/loginpage");
+      navigate("/");
     }
   }, [navigate]);
 
@@ -72,7 +72,7 @@ export default function FollowupDashboard() {
 
       if (res.status === 403) {
         alert("権限がありません。ログインし直してください。");
-        navigate("/loginpage");
+        navigate("/");
         return;
       }
 
