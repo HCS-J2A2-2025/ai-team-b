@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 # 既存ルーター
 from csv_api import router as csv_router
-from followup.api import router as followup_router
+#from followup_api import router as followup_router
 
 # report_t_all.csv の列名ゆれ/BOM/空白を吸収する
 from company_summary_batch import (
@@ -27,7 +27,7 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 # ルーター登録
 app.include_router(csv_router)
-app.include_router(followup_router)
+#app.include_router(followup_router)
 
 # CORS
 app.add_middleware(
@@ -133,6 +133,10 @@ def _create_report(name: str, student_no: str | None = None):
         interviews = build_interview_records_for_company(company_name, student_no)
     except Exception as e:
         print("[WARN] build_interview_records_for_company failed:", e)
+        interviews = []
+        
+    # ★ AI要約が失敗している場合は質問データを出さない
+    if isinstance(report, str) and report.startswith("[ERROR]"):
         interviews = []
 
     # 参考：最新の生テキスト

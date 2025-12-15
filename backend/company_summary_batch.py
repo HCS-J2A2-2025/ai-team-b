@@ -134,6 +134,11 @@ CONTENT_TAG_RULES = {
     "自己PR": ["自己PR"],
     "逆質問": ["逆質問"],
 }
+# ====== 質問に出したくない話題（合否・内定など） ======
+QUESTION_NG_WORDS = [
+    "内定", "採用", "合格", "不合格", "落選", "結果", "通過", "辞退",
+    "合否", "選考結果", "内々定", "オファー"
+]
 
 
 def detect_content_tags(text):
@@ -270,84 +275,57 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
     """
     round_index : 1,2,3...
     total_rounds: その学生がその企業で受けた面接総数
+
+    ルール:
+    - 表示は「一次面接 / 二次面接 / 三次面接 / 最終面接」の4種類に統一
+    - total_rounds >= 4 の場合:
+        1->一次, 2->二次, 3->三次, 4以降->最終
+    - total_rounds <= 3 の場合:
+        最後の回は必ず最終（2回で最終などに対応）
+        それ以外は一次/二次/三次を割当
     """
+
+    # --- 入力を安全にする ---
     try:
         round_index = int(round_index)
     except Exception:
         round_index = 1
+
     try:
         total_rounds = int(total_rounds)
     except Exception:
         total_rounds = round_index if round_index > 0 else 1
 
-    if total_rounds <= 0:
-        total_rounds = 1
     if round_index <= 0:
         round_index = 1
+    if total_rounds <= 0:
+        total_rounds = 1
 
-    # 最後の回は必ず最終
+    # round_index が total を超える異常値も最後扱いに寄せる
+    if round_index > total_rounds:
+        round_index = total_rounds
+
+    # --- 4回以上は「一次/二次/三次/最終」に丸める ---
+    if total_rounds >= 4:
+        if round_index == 1:
+            return "一次面接"
+        if round_index == 2:
+            return "二次面接"
+        if round_index == 3:
+            return "三次面接"
+        return "最終面接"
+
+    # --- 1〜3回のとき：最後は必ず最終（2回で最終など） ---
     if round_index == total_rounds:
         return "最終面接"
 
+    # 最後以外は順番通り
     if round_index == 1:
         return "一次面接"
     if round_index == 2:
         return "二次面接"
-    if round_index == 3:
-        return "三次面接"
-    return f"{round_index}次面接"
+    return "三次面接"
 
-
-# ====== 企業ごとサマリ作成（company_summary_t用） ======
-def summarize_company(group_df: pd.DataFrame) -> dict:
-    col_company = "企業名"
-    col_event = "イベント種別"
-    col_result = "結果種別"
-    col_start = "開始日時"
-    col_text = "面接内容"
-
-    if not {col_company, col_event, col_result, col_start, col_text}.issubset(group_df.columns):
-        print("[WARN] summarize_company: 必須カラム不足:", group_df.columns)
-        return {}
-
-    company_name = str(group_df[col_company].iloc[0])
-
-    formats, dresses, atmospheres = [], [], []
-    content_tags_all, latest_records_list = [], []
-
-    sorted_df = group_df.copy()
-    sorted_df["start_dt_obj"] = pd.to_datetime(sorted_df[col_start], errors="coerce")
-    sorted_df = sorted_df.sort_values("start_dt_obj", ascending=False)
-
-    for _, row in sorted_df.iterrows():
-        text = clean_text(row.get(col_text, ""))
-        fmt = detect_format(text)
-        dress = detect_dress_code(text)
-        atm = detect_atmosphere_rule(text)
-        tags = detect_content_tags(text)
-
-        formats.append(fmt)
-        dresses.append(dress)
-        atmospheres.append(atm)
-        content_tags_all.extend(tags)
-
-        latest_records_list.append(f"{row.get(col_start,'')} {row.get(col_event,'')} {row.get(col_result,'')} {fmt}")
-
-    def calc_dist(values):
-        c = Counter(v for v in values if v != "不明")
-        total = sum(c.values())
-        if total == 0:
-            return {}
-        return {k: round(v / total, 3) for k, v in c.items()}
-
-    return {
-        "company_name": company_name,
-        "content_top_tags": json.dumps([t for t, _ in Counter(content_tags_all).most_common(5)], ensure_ascii=False),
-        "atmosphere_dist": json.dumps(calc_dist(atmospheres), ensure_ascii=False),
-        "format_dist": json.dumps(calc_dist(formats), ensure_ascii=False),
-        "dress_code_dist": json.dumps(calc_dist(dresses), ensure_ascii=False),
-        "latest_records": json.dumps(latest_records_list[:LATEST_RECORDS_LIMIT], ensure_ascii=False),
-    }
 
 
 # ====== LLM による自然文レポート生成 ======
@@ -422,7 +400,7 @@ def generate_detailed_report(row: pd.Series) -> str:
         response = requests.post(
             url,
             json={
-                "model": "qwen2.5:14b-instruct",
+                "model": "",
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": 0.4},
@@ -470,13 +448,13 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         if df_company.empty:
             return []
 
-    # 学籍番号指定があれば、その人だけ（互換）
+    # 学籍番号指定（個人モード）
     if student_no is not None and col_student in df_company.columns:
         df_company = df_company[df_company[col_student].astype(str).str.strip() == str(student_no).strip()].copy()
         if df_company.empty:
             return []
 
-    # 面接のみ（筆記などは除外）
+    # 面接のみ
     df_iv = df_company[df_company[col_event].astype(str).str.strip() == "試験_面接"].copy()
     if df_iv.empty:
         return []
@@ -494,74 +472,160 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     else:
         df_iv["_student_key"] = "UNKNOWN"
 
-    # 何回目（学籍番号ごと）
+    # 回次（学籍番号ごとに古→新で 1,2,3...）
     df_iv = df_iv.sort_values(["_student_key", "start_dt_obj"])
     df_iv["round_index"] = df_iv.groupby("_student_key").cumcount() + 1
-
-    # 総回数（学籍番号ごと）
     total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
 
-    # 最新10人（各人の最新1件）
-    latest_each_student = (
-        df_iv.sort_values("start_dt_obj")
-            .groupby("_student_key", as_index=False)
-            .tail(1)
-            .copy()
+    # ---------------------------------------------------
+    # ★ 10人分を集計する（最新10人）
+    # ---------------------------------------------------
+    latest_dt_per_student = (
+        df_iv.groupby("_student_key")["start_dt_obj"]
+            .max()
+            .sort_values(ascending=False)
     )
-    latest_each_student = latest_each_student.sort_values("start_dt_obj", ascending=False).head(DISPLAY_RECORD_LIMIT)
-    latest_each_student = latest_each_student.sort_values("start_dt_obj")  # 表示順は古→新
+    latest_student_keys = latest_dt_per_student.head(DISPLAY_RECORD_LIMIT).index.tolist()
+    df_top = df_iv[df_iv["_student_key"].isin(latest_student_keys)].copy()
+    if df_top.empty:
+        return []
+
+    # ラベル付け（一次/二次/三次/最終）
+    def _round_label(row):
+        key = str(row.get("_student_key", "UNKNOWN"))
+        total = int(total_rounds_map.get(key, int(row.get("round_index", 1))))
+        idx = int(row.get("round_index", 1))
+        return calc_round_label(idx, total)
+
+    df_top["round_label"] = df_top.apply(_round_label, axis=1)
+
+    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
 
     records = []
-    for i, row in latest_each_student.reset_index(drop=True).iterrows():
-        result = str(row.get(col_result, "")).strip()
-        status_label = "合格" if result in ["継続（合格）", "内定"] else "落選"
+    for label in ordered_labels:
+        sub = df_top[df_top["round_label"] == label].copy()
+        if sub.empty:
+            continue
 
-        fmt_val = str(row.get(col_format, ""))
-        type_label = "オンライン" if "オンライン" in fmt_val else "対面"
+        # よくある形式（オンライン/対面）
+        types = []
+        all_questions = []
+        memos = []
 
-        start_dt = row.get("start_dt_obj", pd.NaT)
-        year_str = f"{start_dt.year}年" if not pd.isna(start_dt) else ""
+        for _, r in sub.iterrows():
+            # type
+            fmt_val = str(r.get(col_format, ""))
+            types.append("オンライン" if "オンライン" in fmt_val else "対面")
 
-        report_id = str(row.get(col_report_id, "")).strip()
-        if not report_id:
-            report_id = f"{target_name}_{row.get(col_start,'')}_{i}"
+            # questions
+            raw_text = str(r.get(col_text, "") or "")
+            qs_raw = extract_questions(raw_text, max_q=10)  # 少し多めに拾ってから落とす
 
-        # ★ public_id（外に出すID）
-        public_id = make_public_id(report_id)
+            qs = []
+            for q in qs_raw:
+                # 内定/合否系は除外
+                if any(w in q for w in QUESTION_NG_WORDS):
+                    continue
 
-        raw_text = str(row.get(col_text, "") or "")
-        questions = extract_questions(raw_text, max_q=6)
+                q2 = normalize_to_question(q)
 
-        memo = clean_text(raw_text)
-        memo = memo[:180] + ("…" if len(memo) > 180 else "")
+                # 変なのを軽く除外（短すぎ/長すぎ）
+                if 8 <= len(q2) <= 60 and (not any(w in q2 for w in QUESTION_NG_WORDS)):
+                    qs.append(q2)
 
-        r_idx = int(row.get("round_index", 1))
-        student_key = str(row.get("_student_key", "UNKNOWN"))
-        total_rounds = int(total_rounds_map.get(student_key, r_idx))
+            # ここで上位5つだけにする
+            qs = qs[:5]
 
-        title = calc_round_label(r_idx, total_rounds)
+            all_questions.extend(qs)
 
-        # ✅ 内部用：report_idは保持（後でdetailで逆引きに使う）
+            # memo（雰囲気的な要約を短く：上位の内容をつなぐ）
+            t = clean_text(raw_text)
+            if t:
+                memos.append(t[:120])
+
+        # 質問：頻出順に並べる（最大5個）
+        q_counter = Counter([q.strip() for q in all_questions if q.strip()])
+        top_questions = [q for q, _ in q_counter.most_common(5)]
+
+        # type：多数決
+        type_label = Counter(types).most_common(1)[0][0] if types else ""
+
+        # memo：代表文（長すぎないように）
+        memo_text = " / ".join(memos[:2])
+        memo_text = memo_text[:180] + ("…" if len(memo_text) > 180 else "")
+
+        # UI互換で返す（4枚になる）
         records.append(
             {
-                "id": public_id,                 # ← 外に出す
-                "_report_id": report_id,         # ← 外に出さない（先頭_にして分かりやすく）
-                "student_no": str(row.get(col_student, "")).strip() if col_student in latest_each_student.columns else "",
-                "round_index": r_idx,
-                "total_rounds": total_rounds,
-                "title": title,
-                "year": year_str,
+                "id": label,                 # 4枚なので label をIDに
+                "title": label,              # 一次/二次/三次/最終
+                "year": "",                  # 必要なら後で入れる
                 "term": "",
-                "status": status_label,
-                "type": type_label,
-                "questions": questions,          # ← resultで返さないなら残してOK（内部用）
-                "memo": memo,                    # ← resultで返さないなら残してOK（内部用）
-                "start_datetime": str(row.get(col_start, "")),
+                "status": f"{len(sub)}件",   # 右のバッジを件数に
+                "type": type_label,          # 多数派の形式
+                "questions": top_questions,  # ← ここが「質問内容」に出る
+                "memo": memo_text,           # 代表メモ
+                "start_datetime": "",        # 使わないなら空でOK
             }
         )
 
     return records
 
+def normalize_to_question(sentence: str) -> str:
+    """
+    文章を「面接で聞かれた質問文」っぽく正規化する
+    - すでに質問なら整形だけ
+    - 「〜について教えてください」などの重複を防ぐ
+    """
+    if not isinstance(sentence, str):
+        return ""
+
+    s = re.sub(r"\s+", " ", sentence).strip()
+    if not s:
+        return ""
+
+    # 末尾の句点/読点などを軽く整理
+    s = s.rstrip("。．!！")
+
+    # すでに質問っぽい終わり方の定型
+    already_question = (
+        "教えてください" in s
+        or "伺えますか" in s
+        or "お願いします" in s
+        or "ありますか" in s
+        or "できますか" in s
+        or s.endswith("か")
+        or "？" in s
+        or "?" in s
+    )
+
+    # すでに「〜について教えてください」が入ってるなら余計な付与をしない
+    if "について教えてください" in s or "について教えて下さい" in s:
+        # 「。について教えてください。」みたいな変な連結があれば修正
+        s = s.replace("。について教えてください", "について教えてください")
+        s = s.replace("。について教えて下さい", "について教えて下さい")
+        # 「について教えてください。について教えてください」重複除去
+        s = re.sub(r"(について教えてください。?)+$", "について教えてください", s)
+        return s if s.endswith("？") or s.endswith("。") else s + "。"
+
+    # すでに質問文なら、最後だけ整える
+    if already_question:
+        if ("？" not in s) and ("?" not in s) and not s.endswith("。"):
+            # 「〜ですか」系は「？」に寄せる
+            if s.endswith("か"):
+                return s + "？"
+            return s + "。"
+        return s
+
+    # 評価/感想っぽい語尾を除去
+    s = re.sub(r"(が評価された|が確認された|が見られた|が高い|が強い|が必要|と感じた|と思った)$", "", s).strip()
+
+    # 「〜について」だけで終わってたら「教えてください」を付ける
+    if s.endswith("について") or s.endswith("に関して"):
+        return s + "教えてください。"
+
+    # それ以外はテンプレ質問にする
+    return f"{s}について教えてください。"
 
 
 # ============================================================
@@ -649,6 +713,129 @@ def summarize_latest_trends_by_round(company_name: str, limit_records: int = 50)
         }
 
     return result
+
+def summarize_questions_by_round_for_latest_students(
+    company_name: str,
+    latest_students: int = 10,
+    max_questions_per_record: int = 6,
+    top_k: int = 5,
+) -> dict:
+    """
+    企業×回次で、最新N人分の質問を集計して返す
+    - 頻出質問: 人数カウント付き
+    - 特徴的質問: 低頻度（1〜2人）だが内容が具体的なもの
+    """
+
+    df = load_report_df()
+
+    col_company = "企業名"
+    col_event = "イベント種別"
+    col_start = "開始日時"
+    col_text = "面接内容"
+    col_student = "学籍番号"
+
+    required = [col_company, col_event, col_start, col_text]
+    if not set(required).issubset(df.columns):
+        return {}
+
+    # 対象企業・面接のみ
+    df = df[
+        (df[col_company].astype(str).str.strip() == str(company_name).strip()) &
+        (df[col_event].astype(str).str.strip() == "試験_面接")
+    ].copy()
+    if df.empty:
+        return {}
+
+    # 日付整形
+    df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
+    df = df.dropna(subset=["start_dt_obj"]).copy()
+    if df.empty:
+        return {}
+
+    # 学籍番号キー
+    if col_student in df.columns:
+        df["_student_key"] = df[col_student].astype(str).fillna("").str.strip()
+        df.loc[df["_student_key"] == "", "_student_key"] = "UNKNOWN"
+    else:
+        # 学籍番号が無いなら「全員UNKNOWN」になり10人集計ができないので注意
+        df["_student_key"] = "UNKNOWN"
+
+    # round_index付与
+    df = df.sort_values(["_student_key", "start_dt_obj"])
+    df["round_index"] = df.groupby("_student_key").cumcount() + 1
+    total_rounds_map = df.groupby("_student_key")["round_index"].max().to_dict()
+
+    # 最新N人を決める（各人の最新日時でランキング）
+    latest_dt_per_student = df.groupby("_student_key")["start_dt_obj"].max().sort_values(ascending=False)
+    latest_student_keys = latest_dt_per_student.head(latest_students).index.tolist()
+
+    df = df[df["_student_key"].isin(latest_student_keys)].copy()
+    if df.empty:
+        return {}
+
+    # round_label付与（最終判定は総回数ベース）
+    def classify_row(r) -> str:
+        key = str(r.get("_student_key", "UNKNOWN"))
+        total = int(total_rounds_map.get(key, int(r.get("round_index", 1))))
+        idx = int(r.get("round_index", 1))
+        return calc_round_label(idx, total)
+
+    df["round_label"] = df.apply(classify_row, axis=1)
+
+    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
+    out = {}
+
+    # ★質問を軽く正規化（見た目違いをまとめる）
+    def normalize_question(q: str) -> str:
+        q = re.sub(r"\s+", " ", str(q)).strip()
+        q = q.replace("？", "?")
+        q = re.sub(r"[?]+$", "？", q)  # 末尾は「？」に統一
+        q = re.sub(r"^(Q\d+\.?\s*)", "", q, flags=re.IGNORECASE)
+        return q
+
+    for label in ordered_labels:
+        sub = df[df["round_label"] == label].copy()
+        if sub.empty:
+            continue
+
+        # 質問 -> その質問を出した学生集合（人数カウント）
+        q_to_students = {}
+
+        for _, r in sub.iterrows():
+            key = str(r.get("_student_key", "UNKNOWN"))
+            text = clean_text(str(r.get(col_text, "") or ""))
+
+            qs = extract_questions(text, max_q=max_questions_per_record)
+            for q in qs:
+                nq = normalize_question(q)
+                if not nq:
+                    continue
+                q_to_students.setdefault(nq, set()).add(key)
+
+        # 頻出順
+        freq = [(q, len(students)) for q, students in q_to_students.items()]
+        freq.sort(key=lambda x: x[1], reverse=True)
+
+        top_questions = []
+        for q, cnt in freq[:top_k]:
+            top_questions.append({"q": q, "count": cnt})
+
+        # 特徴的（例：1人 or 2人、かつ長めで具体的な質問）
+        unique_questions = []
+        for q, cnt in freq:
+            if cnt <= 2 and len(q) >= 14:
+                unique_questions.append({"q": q, "count": cnt})
+            if len(unique_questions) >= top_k:
+                break
+
+        out[label] = {
+            "student_count": int(sub["_student_key"].nunique()),
+            "top_questions": top_questions,
+            "unique_questions": unique_questions,
+        }
+
+    return out
+
 
 
 # ====== 最新 N 件の生テキスト取得 ======
