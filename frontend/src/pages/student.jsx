@@ -17,7 +17,9 @@ function StudentPage() {
 
   const [suggestions, setSuggestions] = useState([]);
   const [isSuggestLoading, setIsSuggestLoading] = useState(false);
-
+  const [showSubmitting, setShowSubmitting] = useState(false);
+  const loadingTimerRef = useRef(null);
+  const fetchAbortRef = useRef(null);
   // API通信中表示（任意）
   const [isFetching, setIsFetching] = useState(false);
 
@@ -31,58 +33,92 @@ function StudentPage() {
     localStorage.removeItem("jobnaviUser");
     navigate("/loginpage");
   };
+useEffect(() => {
+  const stored = localStorage.getItem("jobnaviUser");
+  if (!stored) {
+    navigate("/loginpage");
+    return;
+  }
+  try {
+    const user = JSON.parse(stored);
+    const role = (user.role || "").toLowerCase();
+    if (role !== "teacher" && role !== "admin") {
+      navigate("/loginpage"); // または "/search" に戻すでもOK
+      return;
+    }
+    setRole(role);
+  } catch {
+    navigate("/loginpage");
+  }
+}, [navigate]);
+
+  // Search.jsx と同じ「遅延表示ローディング」
+useEffect(() => {
+  // isFetching が true になったら「遅延で」表示
+  if (isFetching) {
+    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+    loadingTimerRef.current = setTimeout(() => setShowSubmitting(true), 800); // 800〜1000ms 好みで
+    return;
+  }
+
+  // isFetching が false になったら必ず非表示
+  if (loadingTimerRef.current) {
+    clearTimeout(loadingTimerRef.current);
+    loadingTimerRef.current = null;
+  }
+  setShowSubmitting(false);
+}, [isFetching]);
+
 
   // ロール確認（teacher/adminのみ）※今のままだと role を使ってないので警告が気になるなら setRole を消してもOK
   useEffect(() => {
-    const stored = localStorage.getItem("jobnaviUser");
-    if (!stored) {
-      navigate("/loginpage");
-      return;
-    }
-    try {
-      const user = JSON.parse(stored);
-      if (user.role !== "teacher" && user.role !== "admin") {
-        navigate("/loginpage");
+    const fetchOne = async () => {
+      if (!searchedNo) {
+        setStudentData(null);
         return;
       }
-      setRole(user.role);
-    } catch {
-      navigate("/loginpage");
-    }
-  }, [navigate]);
 
-useEffect(() => {
-  const fetchOne = async () => {
-    if (!searchedNo) {
-      setStudentData(null);
-      return;
-    }
+      // 前回の学生分析リクエストをキャンセル
+      if (fetchAbortRef.current) {
+        fetchAbortRef.current.abort();
+      }
+      const controller = new AbortController();
+      fetchAbortRef.current = controller;
 
-    setIsFetching(true);
-    try {
-      const res = await fetch("http://127.0.0.1:8000/api/student/analysis", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ student_id: searchedNo, use_ai: false }),
-      });
+      setIsFetching(true);
 
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      try {
+        const res = await fetch("http://127.0.0.1:8000/api/student/analysis", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ student_id: searchedNo, use_ai: false }),
+          signal: controller.signal,
+        });
 
-      // ✅ APIは「dataが1人分オブジェクト」なので、そのまま使う
-      const one = json?.data && Object.keys(json.data).length > 0 ? json.data : null;
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
 
-      setStudentData(one);
-    } catch (err) {
-      console.error("学生データ取得エラー:", err);
-      setStudentData(null);
-    } finally {
-      setIsFetching(false);
-    }
-  };
+        const one =
+          json?.data && Object.keys(json.data).length > 0 ? json.data : null;
 
-  fetchOne();
-}, [searchedNo]);
+        setStudentData(one);
+      } catch (err) {
+        if (err?.name !== "AbortError") {
+          console.error("学生データ取得エラー:", err);
+          setStudentData(null);
+        }
+      } finally {
+        setIsFetching(false);
+      }
+    };
+    fetchOne();
+
+    // searchedNo が変わる/アンマウントでキャンセル
+    return () => {
+      if (fetchAbortRef.current) fetchAbortRef.current.abort();
+    };
+  }, [searchedNo]);
+
 
 
   const suggestAbortRef = useRef(null);
@@ -148,6 +184,8 @@ const handleInputChange = async (e) => {
 
     setApiError(null);
     setSuggestions([]);
+      setIsFetching(true);   // 先に立てる
+    setStudentData(null);
     setSearchedNo(v);
   };
 
@@ -156,6 +194,16 @@ const handleInputChange = async (e) => {
       <AppHeader title="学生受験分析レポート" onLogout={handleLogout} />
 
       <main className="app-main">
+
+      {showSubmitting && (
+        <div className="loading-backdrop">
+          <div className="loading-box">
+            <div className="loading-text">学生分析レポートを生成しています…</div>
+            <div className="loading-spinner" />
+          </div>
+        </div>
+      )}
+
         <section>
           <h1 className="main-title">学生受験分析レポート</h1>
 
@@ -207,10 +255,6 @@ const handleInputChange = async (e) => {
         <div className="student-page-root">
           {searchedNo && <h3>📌 学籍番号：{searchedNo}</h3>}
 
-          {/* API取得中 */}
-          {isFetching && (
-            <p className="student-notfound">読み込み中...</p>
-          )}
 
           {/* 検索確定後、取得できなかった */}
           {searchedNo && !isFetching && !studentData && !apiError && (
