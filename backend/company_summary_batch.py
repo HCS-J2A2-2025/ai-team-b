@@ -199,7 +199,7 @@ def ask_ai(prompt: str) -> str:
         r = requests.post(
             url,
             json={
-                "model": model,
+                "model": "qwen2.5:14b-instruct",
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": 0.4},
@@ -301,8 +301,7 @@ def load_report_df():
 
     if rename_map:
         df = df.rename(columns=rename_map)
-
-    print("★ 正規化後カラム一覧:", df.columns.tolist())
+        
     return df
 
 
