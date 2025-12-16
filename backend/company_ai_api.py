@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from analysis import build_student_analysis
+from analysis import build_student_analysis, suggest_student_ids
 from company_summary_batch import generate_student_ai_summary
 # 既存ルーター
 from csv_api import router as csv_router
@@ -71,6 +71,9 @@ class InterviewDetailRequest(BaseModel):
 class CompanyResultRequest(BaseModel):
     request_id: str
 
+class StudentAnalysisRequest(BaseModel):
+    student_id: str
+    use_ai: bool = True
 
 # =========================
 # CSV helpers
@@ -374,29 +377,16 @@ def api_student_analysis(
 def api_student_analysis_post(req: StudentAnalysisRequest):
     data = build_student_analysis(
         student_id=req.student_id,
-        use_ai=req.use_ai,
+        use_ai=True,   # ← POSTだけ強制ON
     )
     sid = str(req.student_id).strip()
-
-    return {
-        "student_id": sid,
-        "data": data.get(sid, {}),
-    }
-
+    return {"student_id": sid, "data": data.get(sid, {})}
 
 class StudentSuggestRequest(BaseModel):
     keyword: str
 
 @app.post("/api/student/suggest")
 def api_student_suggest(req: StudentSuggestRequest):
-    data = build_student_analysis()  # AIは内部でOFF
-    kw = req.keyword.strip().upper()
+    candidates = suggest_student_ids(req.keyword, limit=10)
+    return {"candidates": candidates}
 
-    candidates = [
-        sid for sid in data.keys()
-        if sid.upper().startswith(kw)
-    ]
-
-    return {
-        "candidates": candidates[:10]
-    }
