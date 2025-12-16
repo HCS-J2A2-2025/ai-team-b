@@ -7,7 +7,7 @@ from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from analysis import build_student_analysis
-
+from company_summary_batch import generate_student_ai_summary
 # 既存ルーター
 from csv_api import router as csv_router
 #from followup_api import router as followup_router
@@ -175,6 +175,10 @@ def _cache_put(payload: dict) -> str:
     REPORT_CACHE[rid] = payload
     REPORT_CACHE_TS[rid] = time.time()
     return rid
+
+class StudentAnalysisRequest(BaseModel):
+    student_id: str
+    use_ai: bool = False
 
 
 def _cache_get(rid: str) -> dict | None:
@@ -372,3 +376,19 @@ def api_student_analysis(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"student analysis failed: {e}")
 
+@app.post("/api/student/analysis")
+def api_student_analysis_post(req: StudentAnalysisRequest):
+    data = build_student_analysis(
+        student_id=req.student_id,
+        use_ai=False,   # まず統計だけ
+    )
+    sid = str(req.student_id).strip()
+    one = data.get(sid, {})
+
+    if req.use_ai and one:
+        one["AI分析レポート"] = generate_student_ai_summary(sid)
+
+    return {
+        "student_id": sid,
+        "data": one,
+    }

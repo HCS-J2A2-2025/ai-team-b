@@ -105,7 +105,7 @@ def _read_report_csv(path: Path) -> pd.DataFrame:
         df = df.rename(columns=rename_map)
 
     # 必須列チェック
-    required = ["学籍番号", "企業名", "report_text", "start_datetime", "終了日時", "result_status", "形式", "役職"]
+    required = ["学籍番号", "企業名", "report_text", "start_datetime", "終了日時"]
     missing = [c for c in required if c not in df.columns]
     if missing:
         raise ValueError(
@@ -113,8 +113,13 @@ def _read_report_csv(path: Path) -> pd.DataFrame:
             f"今ある列: {df.columns.tolist()}\n"
             f"CSV_PATH: {path}"
         )
-
-    return df
+    if "result_status" not in df.columns:
+        df["result_status"] = "不明"
+    if "形式" not in df.columns:
+        df["形式"] = "不明"
+    if "役職" not in df.columns:
+        df["役職"] = "不明"
+        return df
 
 
 def _to_iso_or_none(x) -> Optional[str]:
