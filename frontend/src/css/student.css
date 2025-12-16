@@ -1,0 +1,76 @@
+/* student.css
+- 検索UIは Search.css をそのまま使う（完全一致のため）
+- ここでは studentページ固有の「下の表示部分」だけ整える
+*/
+
+.student-page-root {
+    width: min(980px, 95vw);
+    margin: 0 auto;
+    padding: 0 0 60px;
+}
+
+.student-error {
+    margin-top: 16px;
+    color: #d32f2f;
+    font-size: 14px;
+    text-align: center;
+}
+
+.student-notfound {
+    color: #d32f2f;
+    margin-top: 10px;
+    text-align: center;
+}
+
+.student-page-root h3 {
+    width: min(760px, 95vw);
+    margin: 18px auto 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #222;
+}
+
+.section-card {
+    width: min(760px, 95vw);
+    margin: 18px auto 0;
+    padding: 18px 18px;
+    border-radius: 14px;
+    background: #ffffff;
+    border: 1px solid #eeeeee;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+}
+
+.section-card h3 {
+    margin: 0 0 10px;
+    font-size: 16px;
+}
+
+.section-card ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.section-card li {
+    margin: 6px 0;
+}
+
+.ai-report {
+    background: #fafafa;
+    border: 1px solid #eeeeee;
+    border-radius: 12px;
+    padding: 12px 12px;
+}
+
+.ai-report p {
+    margin: 0 0 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: #222;
+    font-size: 14px;
+}
+
+@media (max-width: 750px) {
+    .student-page-root {
+        padding-bottom: 48px;
+    }
+}

@@ -14,9 +14,205 @@ import pandas as pd
 import hmac
 import hashlib
 import base64
-
+from pathlib import Path
+import requests
 # ★ これを .env / 環境変数で必ず上書きする（dev用デフォルトは仮）
 PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
+
+
+def summarize_company(group: pd.DataFrame) -> dict | None:
+    """
+    1社ぶんの report 行（group）から company_summary_t 用の1行を作る。
+    generate_detailed_report() が参照する列を必ず作る:
+      - company_name
+      - content_top_tags (JSON文字列)
+      - atmosphere_dist (JSON文字列)
+      - format_dist (JSON文字列)
+      - dress_code_dist (JSON文字列)
+      - latest_records (JSON文字列)
+    """
+
+    if group is None or group.empty:
+        return None
+
+    # 正規化後の想定列名
+    col_company = "企業名"
+    col_event = "イベント種別"
+    col_start = "開始日時"
+    col_result = "結果種別"
+    col_format = "形式"
+    col_text = "面接内容"
+    col_report_id = "レポートID"
+
+    if col_company not in group.columns:
+        return None
+
+    company_name = str(group[col_company].iloc[0]).strip()
+
+    df = group.copy()
+
+    # 面接だけ（ここは方針次第：面接以外も入れたければ外してOK）
+    if col_event in df.columns:
+        df = df[df[col_event].astype(str).str.strip() == "試験_面接"].copy()
+
+    if df.empty:
+        # 面接が無い会社は summary を作らない（必要なら空サマリ返してもOK）
+        return None
+
+    # 日付
+    if col_start in df.columns:
+        df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
+        df = df.dropna(subset=["start_dt_obj"]).copy()
+    else:
+        df["start_dt_obj"] = pd.NaT
+
+    if df.empty:
+        return None
+
+    # テキスト
+    if col_text in df.columns:
+        df["_text"] = df[col_text].fillna("").astype(str).map(clean_text)
+    else:
+        df["_text"] = ""
+
+    # ---------- 分布集計 ----------
+    atmos = Counter()
+    form = Counter()
+    dress = Counter()
+    tag_counter = Counter()
+
+    for t in df["_text"].tolist():
+        if not t:
+            continue
+        atmos[detect_atmosphere_rule(t)] += 1
+        dress[detect_dress_code(t)] += 1
+
+        # 形式は「形式列」優先。無ければ本文から推定
+        if col_format in df.columns:
+            # 形式列が "オンライン" を含むかどうかで雑に寄せる（運用に合わせて調整OK）
+            # 例: "WEB" や "オンライン(Teams)" など
+            # ※テキスト判定を混ぜたいなら detect_format(t) と併用してもOK
+            pass
+
+        form[detect_format(t)] += 1
+
+        for tg in detect_content_tags(t):
+            tag_counter[tg] += 1
+
+    # 形式列がある場合は上書き（列が信頼できるならこちらが正）
+    if col_format in df.columns:
+        form = Counter()
+        for v in df[col_format].fillna("").astype(str).tolist():
+            vv = v.strip()
+            if not vv:
+                continue
+            if "オンライン" in vv or "WEB" in vv.upper():
+                form["オンライン"] += 1
+            elif "対面" in vv or "来社" in vv:
+                form["対面"] += 1
+            else:
+                form["不明"] += 1
+
+    # タグ上位（多すぎるとLLMがうるさくなるので8個くらい）
+    top_tags = [k for k, _ in tag_counter.most_common(8)]
+
+    # ---------- latest_records ----------
+    df_latest = df.sort_values("start_dt_obj", ascending=False).head(LATEST_RECORDS_LIMIT).copy()
+
+    latest_records = []
+    for _, r in df_latest.iterrows():
+        raw_text = str(r.get(col_text, "") or "")
+        t = clean_text(raw_text)
+        rec = {
+            "start_datetime": str(r.get(col_start, "") or ""),
+            "result": str(r.get(col_result, "") or ""),
+            "format": str(r.get(col_format, "") or ""),
+            "memo": (t[:140] + "…") if len(t) > 140 else t,
+            "questions": extract_questions(raw_text, max_q=3),
+        }
+
+        # 公開用ID（report_id があれば付与）
+        rid = str(r.get(col_report_id, "") or "").strip()
+        if rid:
+            rec["public_id"] = make_public_id(rid)
+
+        latest_records.append(rec)
+
+    # ---------- 出力（company_summary_t 1行） ----------
+    row = {
+        "company_name": company_name,
+        "interview_count": int(len(df)),
+        "content_top_tags": json.dumps(top_tags, ensure_ascii=False),
+        "atmosphere_dist": json.dumps(dict(atmos), ensure_ascii=False),
+        "format_dist": json.dumps(dict(form), ensure_ascii=False),
+        "dress_code_dist": json.dumps(dict(dress), ensure_ascii=False),
+        "latest_records": json.dumps(latest_records, ensure_ascii=False),
+    }
+    return row
+
+
+
+
+
+def generate_student_ai_summary(student_id: str, max_records: int = 8) -> str:
+    df = load_report_df()
+
+    sid = str(student_id).strip()
+    df = df[df["学籍番号"].astype(str).str.strip() == sid]
+    if df.empty:
+        return ""
+
+    df["開始日時"] = pd.to_datetime(df["開始日時"], errors="coerce")
+    df = df.sort_values("開始日時", ascending=False)
+
+    texts = (
+        df["面接内容"].dropna().astype(str).tolist()[:max_records]
+    )
+
+    joined = "\n\n".join(f"- {t}" for t in texts)[:6000]
+
+    prompt = f"""
+あなたは就職活動を支援するキャリアアドバイザーです。
+以下は学籍番号 {sid} の面接レポートです。
+
+【面接ログ】
+{joined}
+
+次の観点で日本語で簡潔にまとめてください。
+1. 全体傾向
+2. 強み
+3. 注意点・改善点
+4. 次回面接への具体的アクション
+"""
+    return ask_ai(prompt)
+
+
+def ask_ai(prompt: str) -> str:
+    base = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    if not base.startswith("http://") and not base.startswith("https://"):
+        base = "http://" + base
+    url = base.rstrip("/") + "/api/generate"
+
+    model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b-instruct")
+
+    try:
+        r = requests.post(
+            url,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.4},
+            },
+            timeout=600,
+        )
+    except Exception as e:
+        return f"[ERROR] Ollama への接続に失敗しました: {e}"
+
+    if not r.ok:
+        return f"[ERROR] Ollama API error {r.status_code}: {r.text}"
+    return (r.json().get("response") or "").strip()
+
 
 def make_public_id(report_id: str) -> str:
     """
@@ -400,7 +596,7 @@ def generate_detailed_report(row: pd.Series) -> str:
         response = requests.post(
             url,
             json={
-                "model": "",
+                "model": "qwen2.5:14b-instruct",
                 "prompt": prompt,
                 "stream": False,
                 "options": {"temperature": 0.4},
