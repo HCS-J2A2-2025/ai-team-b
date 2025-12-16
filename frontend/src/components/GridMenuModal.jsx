@@ -7,7 +7,6 @@ import sonsonImg from "../assets/sonson.png";
 import passwordImg from "../assets/password.png";
 import inteligensImg from "../assets/inteligens.png";
 import reportImg from "../assets/report.png";
-import analysisImg from "../assets/analysisButton.png";
 
 export default function GridMenuModal() {
   const [open, setOpen] = useState(false);
@@ -229,16 +228,7 @@ export default function GridMenuModal() {
                 <p className="grid-menu-text">受験分析レポート</p>
               </div>
             )}
-            {/* ⑥ 就活フォロー分析（新規） */}
-            {(role === "admin" || role === "teacher")&& (
-              <div
-                className="grid-menu-card"
-                onClick={handleClickAnalysis}
-              >
-                <img className="grid-menu-img" src={analysisImg} alt="就活フォロー分析" />
-                <p className="grid-menu-text">就活フォロー分析</p>
-                </div>
-              )}
+
             <button
               type="button"
               className="grid-menu-close-btn"

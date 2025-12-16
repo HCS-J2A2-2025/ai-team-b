@@ -4,8 +4,6 @@ import Result from "./pages/Result.jsx";
 import { Routes, Route } from "react-router-dom";
 import StudentPage from "./pages/student";
 
-import FollowupDashboard from "./pages/FollowupDashboard.jsx";
-
 export default function App() {
   //const [name, setName] = useState("");
   //const [result, setResult] = useState("");
@@ -54,7 +52,6 @@ export default function App() {
     {/* ログイン成功後の画面 */}
       <Route path="/search" element={<Search />} />
       <Route path="/student" element={<StudentPage />} />
-      <Route path="/followup" element={<FollowupDashboard />} />
       {/* 検索結果（左右に分割される画面） */}
       <Route path="/result" element={<Result />} />
   </Routes>
