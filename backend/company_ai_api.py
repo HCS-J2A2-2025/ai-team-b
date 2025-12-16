@@ -357,38 +357,46 @@ def company_suggest(body: SuggestRequestCompat):
 @app.get("/api/student/analysis")
 def api_student_analysis(
     student_id: str | None = Query(default=None),
-    use_ai: bool = Query(default=False),
 ):
-    try:
-        data = build_student_analysis(student_id=student_id, use_ai=use_ai)
+    data = build_student_analysis(
+        student_id=student_id,
+        use_ai=False,   # ← GETではAI絶対OFF
+    )
 
-        # student_id 指定なら「その人の中身だけ」を返す
-        if student_id is not None:
-            sid = str(student_id).strip()
-            return {
-                "student_id": sid,
-                "data": data.get(sid, {}),
-            }
+    if student_id:
+        sid = str(student_id).strip()
+        return {"student_id": sid, "data": data.get(sid, {})}
 
-        # 指定なしなら全員分
-        return {"data": data}
+    return {"data": data}
 
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"student analysis failed: {e}")
 
 @app.post("/api/student/analysis")
 def api_student_analysis_post(req: StudentAnalysisRequest):
     data = build_student_analysis(
         student_id=req.student_id,
-        use_ai=False,   # まず統計だけ
+        use_ai=req.use_ai,
     )
     sid = str(req.student_id).strip()
-    one = data.get(sid, {})
-
-    if req.use_ai and one:
-        one["AI分析レポート"] = generate_student_ai_summary(sid)
 
     return {
         "student_id": sid,
-        "data": one,
+        "data": data.get(sid, {}),
+    }
+
+
+class StudentSuggestRequest(BaseModel):
+    keyword: str
+
+@app.post("/api/student/suggest")
+def api_student_suggest(req: StudentSuggestRequest):
+    data = build_student_analysis()  # AIは内部でOFF
+    kw = req.keyword.strip().upper()
+
+    candidates = [
+        sid for sid in data.keys()
+        if sid.upper().startswith(kw)
+    ]
+
+    return {
+        "candidates": candidates[:10]
     }

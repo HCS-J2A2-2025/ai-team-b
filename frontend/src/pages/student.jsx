@@ -98,7 +98,7 @@ const handleInputChange = async (e) => {
     return;
   }
 
-  // 直前の通信があればキャンセル（連打でズレるのを防ぐ）
+  // 前回リクエストキャンセル
   if (suggestAbortRef.current) {
     suggestAbortRef.current.abort();
   }
@@ -122,7 +122,6 @@ const handleInputChange = async (e) => {
     const json = await res.json();
     setSuggestions(json.candidates || []);
   } catch (err) {
-    // AbortError は無視してOK
     if (err?.name !== "AbortError") {
       console.error("学籍番号サジェスト取得エラー:", err);
     }
@@ -131,6 +130,7 @@ const handleInputChange = async (e) => {
     setIsSuggestLoading(false);
   }
 };
+
 
   // サジェストクリック：入力欄に入れるだけ（検索は確定しない）
   const handleSuggestionClick = (sid) => {
