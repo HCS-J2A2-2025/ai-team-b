@@ -6,7 +6,7 @@ import pandas as pd
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from pydantic import BaseModel
+from analysis import build_student_analysis
 
 # 既存ルーター
 from csv_api import router as csv_router
@@ -349,3 +349,26 @@ def company_suggest(body: SuggestRequestCompat):
 
     out = (prefix_hits + contains_hits)[:15]
     return {"candidates": out, "suggestions": out}
+
+@app.get("/api/student/analysis")
+def api_student_analysis(
+    student_id: str | None = Query(default=None),
+    use_ai: bool = Query(default=False),
+):
+    try:
+        data = build_student_analysis(student_id=student_id, use_ai=use_ai)
+
+        # student_id 指定なら「その人の中身だけ」を返す
+        if student_id is not None:
+            sid = str(student_id).strip()
+            return {
+                "student_id": sid,
+                "data": data.get(sid, {}),
+            }
+
+        # 指定なしなら全員分
+        return {"data": data}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"student analysis failed: {e}")
+
