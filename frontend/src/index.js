@@ -1,21 +1,19 @@
-import React from 'react';
-import ReactDOM from 'react-dom/client';
-import './index.css';
-import App from './App';
-import reportWebVitals from './reportWebVitals';
-import { MemoryRouter } from 'react-router-dom';
+// src/index.js
+import React from "react";
+import ReactDOM from "react-dom/client";
+import { MemoryRouter } from "react-router-dom";
+import App from "./App";
+import "./index.css"; // ✅ これが超重要（body margin:0 を確実に効かせる）
 
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-  <MemoryRouter initialEntries={["/search"]}>
-    <React.StrictMode>
+// ✅ 直打ち対策：URLに何が入っても / に戻す
+if (window.location.pathname !== "/") {
+  window.history.replaceState({}, "", "/");
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(
+  <React.StrictMode>
+    <MemoryRouter initialEntries={["/"]}>
       <App />
-    </React.StrictMode>
-  </MemoryRouter>
+    </MemoryRouter>
+  </React.StrictMode>
 );
-
-
-// If you want to start measuring performance in your app, pass a function
-// to log results (for example: reportWebVitals(console.log))
-// or send to an analytics endpoint. Learn more: https://bit.ly/CRA-vitals
-reportWebVitals();
