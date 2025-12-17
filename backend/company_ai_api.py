@@ -18,6 +18,7 @@ from company_summary_batch import (
     build_interview_records_for_company,
     get_latest_interview_texts,
     load_report_df as load_report_df_normalized,
+    summarize_company,
 )
 
 # =========================
@@ -75,23 +76,39 @@ class StudentAnalysisRequest(BaseModel):
     student_id: str
     use_ai: bool = True
 
-# =========================
-# CSV helpers
-# =========================
-def _summary_csv_path() -> str:
-    base_dir = os.path.dirname(__file__)
-    return os.path.join(base_dir, "data", "company_summary_t.csv")
-
-
-def load_summary_df() -> pd.DataFrame:
-    return pd.read_csv(_summary_csv_path(), encoding="utf-8-sig")
-
 def _normalize_company_name(s: str) -> str:
     return re.sub(r"\s+", "", s or "").strip()
 
 def _is_symbol_only(s: str) -> bool:
     # 日本語・英数字が1文字も含まれない
     return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
+
+def _get_company_names_from_report() -> list[str]:
+    """
+    report_t_all.csv 由来の企業名一覧（重複・空白除去済み）を返す。
+    """
+    try:
+        df = load_report_df_normalized()
+    except Exception as e:
+        print("[WARN] load_report_df_normalized failed:", e)
+        return []
+
+    col_candidates = ["企業名", "company_name"]
+    target_col = next((c for c in col_candidates if c in df.columns), None)
+    if not target_col:
+        return []
+
+    names = (
+        df[target_col]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
+    return names
 
 # =========================
 # Report build (internal)
@@ -102,18 +119,19 @@ def _create_report(name: str, student_no: str | None = None):
         return None, {"error": "企業名が空です"}
 
     try:
-        df = load_summary_df()
+        df = load_report_df_normalized()
     except Exception as e:
-        return None, {"error": f"company_summary_t.csv の読み込みに失敗しました: {e}"}
+        return None, {"error": f"report_t_all.csv の読み込みに失敗しました: {e}"}
 
-    if "company_name" not in df.columns:
-        return None, {"error": "company_summary_t.csv に company_name 列がありません"}
+    col_company = "企業名"
+    if col_company not in df.columns:
+        return None, {"error": f"report_t_all.csv に {col_company} 列がありません"}
 
     # 正規化
     norm_input = _normalize_company_name(keyword)
 
     df = df.copy()
-    df["__norm_name"] = df["company_name"].astype(str).apply(_normalize_company_name)
+    df["__norm_name"] = df[col_company].astype(str).apply(_normalize_company_name)
 
     # ③ 完全一致のみ許可
     hit = df[df["__norm_name"] == norm_input]
@@ -121,7 +139,14 @@ def _create_report(name: str, student_no: str | None = None):
     if hit.empty:
         return None, {"error": "データに存在しません（完全一致が必要です）"}
 
-    row = hit.iloc[0]
+    df_company = df[df["__norm_name"] == norm_input].copy()
+    df_company = df_company.drop(columns=["__norm_name"])
+
+    summary_row_dict = summarize_company(df_company)
+    if not summary_row_dict:
+        return None, {"error": "この企業のサマリ生成に失敗しました"}
+
+    row = pd.Series(summary_row_dict)
     company_name = str(row["company_name"]).strip()
 
     # 左：AI要約
@@ -316,16 +341,11 @@ def api_company_suggest(body: SuggestRequest):
     if not keyword:
         return {"candidates": [], "suggestions": []}
 
-    try:
-        df = load_summary_df()
-    except Exception:
-        return {"candidates": [], "suggestions": []}
-
-    if "company_name" not in df.columns:
+    names = _get_company_names_from_report()
+    if not names:
         return {"candidates": [], "suggestions": []}
 
     lower = keyword.lower()
-    names = df["company_name"].dropna().drop_duplicates().astype(str).tolist()
 
     prefix_hits = [n for n in names if n.lower().startswith(lower)]
     contains_hits = [n for n in names if lower in n.lower() and n not in prefix_hits]
@@ -340,16 +360,11 @@ def company_suggest(body: SuggestRequestCompat):
     if not q:
         return {"candidates": [], "suggestions": []}
 
-    try:
-        df = load_summary_df()
-    except Exception:
-        return {"candidates": [], "suggestions": []}
-
-    if "company_name" not in df.columns:
+    names = _get_company_names_from_report()
+    if not names:
         return {"candidates": [], "suggestions": []}
 
     lower = q.lower()
-    names = df["company_name"].dropna().drop_duplicates().astype(str).tolist()
 
     prefix_hits = [n for n in names if n.lower().startswith(lower)]
     contains_hits = [n for n in names if lower in n.lower() and n not in prefix_hits]
@@ -389,4 +404,3 @@ class StudentSuggestRequest(BaseModel):
 def api_student_suggest(req: StudentSuggestRequest):
     candidates = suggest_student_ids(req.keyword, limit=10)
     return {"candidates": candidates}
-
