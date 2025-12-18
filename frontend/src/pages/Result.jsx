@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect,useRef } from "react";
 import { useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import "../css/Result.css";
@@ -31,6 +31,13 @@ export default function Result() {
   const handleLogout = () => {
     console.log("ログアウトしました");
   };
+  const didInitialFetchRef = useRef(false);
+// 会社名の比較用（空白差・大小差を吸収）
+  const normalizeCompanyName = (s) =>
+    String(s ?? "")
+      .trim()
+      .replace(/\s+/g, " ")   // 連続空白を1個に
+      .toLowerCase();
 
   const getReportId = (record, idx) =>
     record?.id ||
@@ -70,7 +77,7 @@ const fetchCompanyReport = async (companyName) => {
   setDetailLoadingMap({});
   setDetailErrorMap({});
   let timerId = null;
-  timerId = setTimeout(() => setShowLoading(true), 1000);
+  timerId = setTimeout(() => setShowLoading(true), 200);
 
   try {
   // ① POST：request_id だけ返る
@@ -83,8 +90,7 @@ const fetchCompanyReport = async (companyName) => {
   const postData = await res.json().catch(() => ({}));
 
   if (!res.ok || postData?.error) {
-    setReport("");
-    setRecords([]);
+    // 失敗しても既存表示は維持、エラーだけ出す
     setApiError(postData?.error || `取得に失敗しました（HTTP ${res.status}）`);
     return;
   }
@@ -107,13 +113,11 @@ const fetchCompanyReport = async (companyName) => {
   const data = await res2.json().catch(() => ({}));
 
   if (!res2.ok || data?.error) {
-    setReport("");
-    setRecords([]);
+    // 失敗しても既存表示は維持
     setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
     return;
-  }
-
-  // ✅ 画面に反映
+  } 
+  // 成功した時だけ画面に反映
   setFixedCompanyName(name);
 
 const reportText =
@@ -123,7 +127,7 @@ const reportText =
 
 setReport(reportText);
 
-// ✅ どの形でも拾う
+// どの形でも拾う
 const list =
   (Array.isArray(data?.records) && data.records) ||
   (Array.isArray(data?.interviews) && data.interviews) ||
@@ -131,13 +135,8 @@ const list =
   (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
   [];
 
-// ✅ ここで必ず件数確認できる
-console.log("records count:", list.length, "payload keys:", Object.keys(data || {}));
-
 setRecords(list.slice(-10));
 } catch (e) {
-  setReport("");
-  setRecords([]);
   setApiError("API 接続エラー：サーバーに接続できませんでした");
 } finally {
     clearTimeout(timerId);
@@ -228,15 +227,40 @@ setRecords(list.slice(-10));
     setSearchQuery(name);
     setSuggestions([]);
   };
+// 比較専用：表示/送信には使わない
+const normalizeForCompare = (s) =>
+  String(s ?? "")
+    .replace(/\u3000/g, " ")   // 全角スペース→半角
+    .trim()
+    .replace(/\s+/g, " ")      // 連続スペースを1つに
+    .toLowerCase();            // 大小差を吸収（比較だけ）
 
-  const handleSearchSubmit = async (e) => {
-    e.preventDefault();
-    if (isLoading) return;
+const handleSearchSubmit = async (e) => {
+  e.preventDefault();
+  if (isLoading) return;
+
+  // 送信用は “生の入力” を維持（AI要約の中身を変えない）
+  const raw = searchQuery;
+
+  // 判定だけ正規化
+  const nextKey = normalizeForCompare(raw);
+  const prevKey = normalizeForCompare(fixedCompanyName);
+
+  if (nextKey && prevKey && nextKey === prevKey) {
     setSuggestions([]);
-    await fetchCompanyReport(searchQuery);
-  };
+    setApiError("同一条件のため、AI再生成は行っていません");
+    return;
+  }
+
+  setApiError(null);
+  setSuggestions([]);
+  await fetchCompanyReport(raw); // ←ここは raw のまま
+};
+
 
   useEffect(() => {
+    if (didInitialFetchRef.current) return; // 2回目は無視
+    didInitialFetchRef.current = true;
     if (initialCompanyName !== "会社名が入力されていません") {
       fetchCompanyReport(initialCompanyName);
     }
@@ -314,7 +338,7 @@ setRecords(list.slice(-10));
             <div className="result-ai-report-header">
               <span className="result-ai-icon">✨</span>
               <h3 className="result-ai-report-title">
-                AI要約レポート（{(searchQuery || fixedCompanyName || "").trim()}）
+                AI要約レポート（{(fixedCompanyName || "").trim()}）
               </h3>
             </div>
 

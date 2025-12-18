@@ -14,6 +14,7 @@ export default function Loginpage() {
     const [password, setPassword] = useState("");
     const [open, setOpen] = useState(false);
     const navigate = useNavigate();
+    const [role, setRole] = useState(null);
 
     const [error, setError] = useState("");
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -134,6 +135,7 @@ export default function Loginpage() {
                         </div>
 
                         {/* ⑤ 受験分析レポート（新規） */}
+                        {(role === "admin" || role === "teacher") && (
                         <div
                             className="grid-menu-card"
                             onClick={handleClickStudent}
@@ -141,6 +143,7 @@ export default function Loginpage() {
                             <img className="grid-menu-img" src={reportImg} alt="受験分析レポート" />
                             <p className="grid-menu-text">受験分析レポート</p>
                         </div>
+                        )}
 
                         <button
                             type="button"

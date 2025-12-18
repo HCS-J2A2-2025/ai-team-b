@@ -104,6 +104,7 @@ body,
   /* ← 中央寄せ */
   display: flex;
   flex-direction: column;
+  position: relative;  /* panel の absolute 基準 */
 }
 
 .search-input-wrapper,
@@ -132,6 +133,8 @@ body,
   align-items: center;
   gap: 10px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.16);
+  position: relative;
+  z-index: 2;
 }
 
 .search-input-wrapper.has-suggest {
@@ -177,10 +180,16 @@ body,
   border: 1px solid #e0e0e0;
   border-top: none;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  pointer-events: auto;  /* クリックを確実に拾う */
   overflow: hidden;
   max-height: 320px;
   display: flex;
   flex-direction: column;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 8px);
+  z-index: 9999;
 }
 
 .suggest-row {
@@ -190,6 +199,7 @@ body,
   gap: 12px;
   font-size: 14px;
   cursor: pointer;
+  user-select: none;   /*ドラッグ・選択防止 */
 }
 
 .suggest-row:hover {

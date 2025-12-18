@@ -16,10 +16,26 @@ export default function Search() {
     const [apiError, setApiError] = useState(null);
     const fileInputRef = useRef(null);
     const navigate = useNavigate();
+    const suggestAbortRef = useRef(null);
+    const latestSuggestKeyRef = useRef("");   // 最後に投げたkeyword
+    const suppressSuggestRef = useRef(false); // サジェスト確定クリック直後の“復活”を抑止
+    const suggestSeqRef = useRef(0);       // 古いレスポンスを捨てる番号
+    const composingRef = useRef(false);
+    const pendingSelectRef = useRef(null);
+    const inputRef = useRef(null);
+
+    const applyPendingSelect = () => {
+    if (pendingSelectRef.current) {
+        handleSuggestionClick(pendingSelectRef.current);
+        pendingSelectRef.current = null;
+    }
+    };
+
 
     // マウント時に ログイン情報を取得
     useEffect(() => {
         const stored = localStorage.getItem("jobnaviUser");
+
         if (!stored) {
             // 未ログイン → ログインページに戻す
             navigate("/");
@@ -32,49 +48,44 @@ export default function Search() {
             console.error(e);
             navigate("/");
         }
+        return () => {
+            if (suggestAbortRef.current) suggestAbortRef.current.abort();
+        };
     }, [navigate]);
 
     // 検索ボタン押したときに /result へ遷移 + 会社名を渡す
     const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!company.trim() || isSubmitting) return;
+    const raw = company.trim();
+    if (!raw || isSubmitting) return;
 
     setIsSubmitting(true);
     setApiError(null);
 
-    let timerId = null;
-    timerId = setTimeout(() => setShowSubmitting(true), 1000);
-
     try {
-        const res = await fetch("http://localhost:8000/company", {
+        // ① まず存在チェック（AIなし）
+        const vres = await fetch("http://localhost:8000/api/company/validate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: company }),
+        body: JSON.stringify({ name: raw }),
         });
 
-        if (!res.ok) {
-        setApiError(`AI要約レポートの生成に失敗しました（HTTP ${res.status}）`);
+        const vjson = await vres.json().catch(() => ({}));
+        if (!vres.ok || vjson?.ok === false) {
+        setApiError(vjson?.error || `入力チェックに失敗しました（HTTP ${vres.status}）`);
         return;
         }
 
-        const data = await res.json();
-        if (data.error) {
-        setApiError(data.error || "AI要約レポートの生成中にエラーが発生しました");
-        return;
-        }
-
-        navigate("/result", {
-        state: { companyName: company, report: data.report || "" },
-        });
-    } catch (error) {
-        console.error(error);
+        // ② OKなら Resultへ遷移（ここでは生成しない）
+        const canonicalName = vjson?.company || raw;
+        navigate("/result", { state: { companyName: canonicalName } });
+    } catch (err) {
         setApiError("API 接続エラー：サーバーに接続できませんでした");
     } finally {
-        clearTimeout(timerId);
-        setShowSubmitting(false);
         setIsSubmitting(false);
     }
     };
+
 
 
     const handleLogout = () => {
@@ -156,44 +167,83 @@ export default function Search() {
         }
     };
     const handleCompanyChange = async (e) => {
-        const value = e.target.value;
-        setCompany(value);
+    const value = e.target.value;
+    setCompany(value);
+    setApiError(null);
 
-        if (!value) {
-            setSuggestions([]);
-            return;
-        }
+    // 確定クリック直後は走らせない（復活防止）
+    if (suppressSuggestRef.current) return;
 
-        setIsSuggestLoading(true);
+    const key = value.trim();
 
-        try {
-            const res = await fetch("http://localhost:8000/company_suggest", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ keyword: value }),
-            });
-
-            if (!res.ok) {
-                console.error("候補取得に失敗しました", res.status);
-                setSuggestions([]);
-                return;
-            }
-
-            const data = await res.json();
-            setSuggestions(data.candidates || []);
-        } catch (err) {
-            console.error("候補取得エラー:", err);
-            setSuggestions([]);
-        } finally {
-            setIsSuggestLoading(false);
-        }
-    };
-    const handleSuggestionClick = (name) => {
-        setCompany(name);
+    // 空なら候補消す＆通信止める
+    if (!key) {
+        if (suggestAbortRef.current) suggestAbortRef.current.abort();
         setSuggestions([]);
+        return;
+    }
+
+    // ★この入力に対するリクエスト番号
+    const seq = ++suggestSeqRef.current;
+
+    // 前回を中断
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    const controller = new AbortController();
+    suggestAbortRef.current = controller;
+
+    setIsSuggestLoading(true);
+
+    try {
+        const res = await fetch("http://localhost:8000/company_suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: value }),
+        signal: controller.signal,
+        });
+
+        const data = await res.json().catch(() => ({}));
+
+        // ★古い返りは捨てる（これが本命）
+        if (seq !== suggestSeqRef.current) return;
+        if (suppressSuggestRef.current) return;
+
+        if (!res.ok) {
+        setSuggestions([]);
+        return;
+        }
+
+        setSuggestions(Array.isArray(data?.candidates) ? data.candidates : []);
+    } catch (err) {
+        if (err?.name !== "AbortError") console.error("候補取得エラー:", err);
+        // ★古い返りは捨てる
+        if (seq !== suggestSeqRef.current) return;
+        setSuggestions([]);
+    } finally {
+        if (seq === suggestSeqRef.current) setIsSuggestLoading(false);
+    }
     };
+
+
+
+    const handleSuggestionClick = (name) => {
+    suppressSuggestRef.current = true;
+
+    // 進行中のサジェスト通信を止める
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    suggestSeqRef.current++; // ★これで「遅れて返ったやつ」は必ず捨てられる
+
+    setCompany(name);
+    setSuggestions([]);
+    setApiError(null);
+    setIsSuggestLoading(false);
+
+    // 次にユーザーが入力したら再開
+    setTimeout(() => {
+        suppressSuggestRef.current = false;
+    }, 0);
+    };
+
+
 
     return (
         <>
@@ -223,34 +273,58 @@ export default function Search() {
                                     }`}
                             >
                                 <span className="search-icon">🔍</span>
-
                                 <input
+                                    ref={inputRef}
                                     type="text"
                                     className="search-input"
                                     placeholder="会社名を記入　 例）ダイアモンドヘッド"
                                     value={company}
                                     onChange={handleCompanyChange}
+                                    onCompositionStart={() => { composingRef.current = true; }}
+                                    onCompositionEnd={() => {
+                                        composingRef.current = false;
+                                        // compositionend が来た時も一応適用
+                                        applyPendingSelect();
+                                    }}
+                                    onBlur={() => {
+                                        // ★ blur が来た時に pending を適用（これが効く）
+                                        composingRef.current = false;
+                                        applyPendingSelect();
+                                    }}
                                 />
                             </div>
 
                             {suggestions.length > 0 && (
-                                <div className="suggest-panel">
-                                    {isSuggestLoading && (
-                                        <div className="suggest-loading">検索中...</div>
-                                    )}
+                            <div className="suggest-panel">
+                                {isSuggestLoading && <div className="suggest-loading"></div>}
 
-                                    {suggestions.map((name) => (
-                                        <div
-                                            key={name}
-                                            className="suggest-row"
-                                            onClick={() => handleSuggestionClick(name)}
-                                        >
-                                            <span className="suggest-icon">⏺</span>
-                                            <span className="suggest-text">{name}</span>
-                                        </div>
-                                    ))}
+                                {suggestions.map((name) => (
+                                <div
+                                    key={name}
+                                    className="suggest-row"
+                                    onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        e.stopPropagation();
+
+                                        if (composingRef.current) {
+                                        // ★変換中：選択を保留して、input を blur して確定させる
+                                        pendingSelectRef.current = name;
+                                        requestAnimationFrame(() => inputRef.current?.blur());
+                                        return;
+                                        }
+
+                                        // 変換中じゃない：そのまま即選択
+                                        handleSuggestionClick(name);
+                                    }}
+                                    >
+                                    <span className="suggest-icon">⏺</span>
+                                    <span className="suggest-text">{name}</span>
                                 </div>
+
+                                ))}
+                            </div>
                             )}
+
                         </div>
 
                         <button

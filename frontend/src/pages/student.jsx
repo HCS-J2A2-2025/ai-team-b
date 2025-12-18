@@ -28,6 +28,8 @@ function StudentPage() {
 
   const inputRef = useRef(null);
   const navigate = useNavigate();
+  // 追加（stateの近く）
+  const lastSearchedNoRef = useRef(null);
 
   const handleLogout = () => {
     localStorage.removeItem("jobnaviUser");
@@ -57,7 +59,7 @@ useEffect(() => {
   // isFetching が true になったら「遅延で」表示
   if (isFetching) {
     if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-    loadingTimerRef.current = setTimeout(() => setShowSubmitting(true), 800); // 800〜1000ms 好みで
+    loadingTimerRef.current = setTimeout(() => setShowSubmitting(true), 200);
     return;
   }
 
@@ -176,18 +178,29 @@ const handleInputChange = async (e) => {
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  // 検索ボタン：ここで初めて検索確定 → API取得が走る
   const handleSubmit = (e) => {
     e.preventDefault();
     const v = inputNo.trim();
     if (!v) return;
 
+    // ★ 直前と同じ学籍番号ならブロック
+    if (lastSearchedNoRef.current === v) {
+      setApiError("直前と同じ学籍番号のため、再検索は行われません");
+      return;
+    }
+
     setApiError(null);
     setSuggestions([]);
-      setIsFetching(true);   // 先に立てる
+
+    setIsFetching(true);
     setStudentData(null);
+
     setSearchedNo(v);
+
+    // ★ 今回の検索を「直前」として保存
+    lastSearchedNoRef.current = v;
   };
+
 
   return (
     <div className="app-root">
