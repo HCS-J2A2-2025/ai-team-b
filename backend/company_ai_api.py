@@ -1,25 +1,42 @@
-import os
+﻿import os
 import time
 import uuid
 import re
 import pandas as pd
+
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
+
 from analysis import build_student_analysis, suggest_student_ids
-from company_summary_batch import generate_student_ai_summary
+
+# =========================
+# AI switches (NO .env)
+# =========================
+USE_LEFT_AI = True     # ← 左の企業AI要約を使うなら True
+USE_RIGHT_AI = True    # ← 右の面接カードをAIで作るなら True
+
 # 既存ルーター
 from csv_api import router as csv_router
-#from followup_api import router as followup_router
+# from followup_api import router as followup_router
 
-# report_t_all.csv の列名ゆれ/BOM/空白を吸収する
+# company_summary_batch を「モジュールとして」import してスイッチ反映する
+import company_summary_batch as csb
+
+# 必要関数を取り込む（csb. を使ってもOK）
 from company_summary_batch import (
     generate_detailed_report,
     build_interview_records_for_company,
     get_latest_interview_texts,
     load_report_df as load_report_df_normalized,
     summarize_company,
+    generate_student_ai_summary,
 )
+
+# ★ここが超重要：FastAPI側のスイッチを company_summary_batch 側へ反映
+# （あなたが前に作った完成版 company_summary_batch.py が ENABLE_LEFT_AI / ENABLE_RIGHT_AI を持っている前提）
+csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
+csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 
 # =========================
 # FastAPI (docs OFF)
@@ -28,7 +45,7 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 # ルーター登録
 app.include_router(csv_router)
-#app.include_router(followup_router)
+# app.include_router(followup_router)
 
 # CORS
 app.add_middleware(
@@ -69,25 +86,32 @@ class SuggestResponseCompat(BaseModel):
 class InterviewDetailRequest(BaseModel):
     report_id: str
 
+
 class CompanyResultRequest(BaseModel):
     request_id: str
+
 
 class StudentAnalysisRequest(BaseModel):
     student_id: str
     use_ai: bool = True
+
+
 class CompanyValidateRequest(BaseModel):
     name: str
+
+
+# =========================
+# helpers
+# =========================
 def _normalize_company_name(s: str) -> str:
     return re.sub(r"\s+", "", s or "").strip()
 
+
 def _is_symbol_only(s: str) -> bool:
-    # 日本語・英数字が1文字も含まれない
     return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
 
+
 def _get_company_names_from_report() -> list[str]:
-    """
-    report_t_all.csv 由来の企業名一覧（重複・空白除去済み）を返す。
-    """
     try:
         df = load_report_df_normalized()
     except Exception as e:
@@ -110,6 +134,7 @@ def _get_company_names_from_report() -> list[str]:
         .tolist()
     )
     return names
+
 
 # =========================
 # Report build (internal)
@@ -134,9 +159,8 @@ def _create_report(name: str, student_no: str | None = None):
     df = df.copy()
     df["__norm_name"] = df[col_company].astype(str).apply(_normalize_company_name)
 
-    # ③ 完全一致のみ許可
+    # 完全一致のみ許可
     hit = df[df["__norm_name"] == norm_input]
-
     if hit.empty:
         return None, {"error": "データに存在しません（完全一致が必要です）"}
 
@@ -148,27 +172,35 @@ def _create_report(name: str, student_no: str | None = None):
         return None, {"error": "この企業のサマリ生成に失敗しました"}
 
     row = pd.Series(summary_row_dict)
-    company_name = str(row["company_name"]).strip()
+    company_name = str(row.get("company_name", "") or "").strip()
+    if not company_name:
+        return None, {"error": "company_name が空です"}
 
-    # 左：AI要約
-    try:
-        report = generate_detailed_report(row)
-    except Exception as e:
-        print("[WARN] generate_detailed_report failed:", e)
-        report = f"[ERROR] 要約生成に失敗しました: {e}"
+    # ★都度反映（起動後に USE_* を切り替えたくなっても安全）
+    csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
+    csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 
-    # 右：面接一覧
+    # =============================
+    # 左：AI要約（FastAPI側スイッチで制御）
+    # =============================
+    report = ""
+    if USE_LEFT_AI:
+        try:
+            report = generate_detailed_report(row)  # csb.ENABLE_LEFT_AI を見て空返しでもOK
+        except Exception as e:
+            print("[WARN] generate_detailed_report failed:", e)
+            report = ""
+
+    # =============================
+    # 右：面接一覧（company_summary_batch 側スイッチで制御）
+    # =============================
     try:
         interviews = build_interview_records_for_company(company_name, student_no)
     except Exception as e:
         print("[WARN] build_interview_records_for_company failed:", e)
         interviews = []
-        
-    # ★ AI要約が失敗している場合は質問データを出さない
-    if isinstance(report, str) and report.startswith("[ERROR]"):
-        interviews = []
 
-    # 参考：最新の生テキスト
+    # 参考：最新の生テキスト（任意）
     try:
         texts = get_latest_interview_texts(company_name, limit=5)
     except Exception as e:
@@ -186,17 +218,17 @@ def _create_report(name: str, student_no: str | None = None):
 # =========================
 # In-memory cache (TTL)
 # =========================
-REPORT_CACHE: dict[str, dict] = {}         # request_id -> payload
-REPORT_CACHE_TS: dict[str, float] = {}     # request_id -> epoch seconds
-CACHE_TTL_SECONDS = int(os.getenv("REPORT_CACHE_TTL", "300"))  # 5分デフォ
+REPORT_CACHE: dict[str, dict] = {}
+REPORT_CACHE_TS: dict[str, float] = {}
 
-def _cache_cleanup():
+CACHE_TTL_SECONDS = 300
+
+def _cache_cleanup() -> None:
     now = time.time()
     expired = [rid for rid, ts in REPORT_CACHE_TS.items() if now - ts > CACHE_TTL_SECONDS]
     for rid in expired:
         REPORT_CACHE.pop(rid, None)
         REPORT_CACHE_TS.pop(rid, None)
-
 
 def _cache_put(payload: dict) -> str:
     _cache_cleanup()
@@ -205,21 +237,16 @@ def _cache_put(payload: dict) -> str:
     REPORT_CACHE_TS[rid] = time.time()
     return rid
 
-class StudentAnalysisRequest(BaseModel):
-    student_id: str
-    use_ai: bool = False
-
-
 def _cache_get(rid: str) -> dict | None:
     _cache_cleanup()
-    if rid in REPORT_CACHE and rid in REPORT_CACHE_TS:
-        # TTL内なら返す
-        if time.time() - REPORT_CACHE_TS[rid] <= CACHE_TTL_SECONDS:
-            return REPORT_CACHE[rid]
-        # TTL切れ
+    ts = REPORT_CACHE_TS.get(rid)
+    if ts is None:
+        return None
+    if time.time() - ts > CACHE_TTL_SECONDS:
         REPORT_CACHE.pop(rid, None)
         REPORT_CACHE_TS.pop(rid, None)
-    return None
+        return None
+    return REPORT_CACHE.get(rid)
 
 
 # =========================
@@ -229,13 +256,10 @@ def _cache_get(rid: str) -> dict | None:
 def post_company_report(req: CompanyRequest):
     _, result = _create_report(req.name, req.student_no)
 
-    # error だけは返していい（中身ではない）
     if isinstance(result, dict) and result.get("error"):
         return {"error": result["error"]}
 
     request_id = _cache_put(result)
-
-    # ★ 中身を返さない：IDだけ返す
     return {"request_id": request_id}
 
 
@@ -252,15 +276,13 @@ def post_company_report_result(req: CompanyResultRequest):
         "report": data.get("report", ""),
         "records": [
             {
-                "id": (r.get("id") or ""),   # public_id
+                "id": (r.get("id") or ""),
                 "title": r.get("title", ""),
                 "year": r.get("year", ""),
                 "term": r.get("term", ""),
                 "status": r.get("status", ""),
                 "type": r.get("type", ""),
                 "start_datetime": r.get("start_datetime", ""),
-
-                # ★ 最短で詳細もここで返す（フロントの詳細API不要にできる）
                 "questions": r.get("questions", []),
                 "memo": r.get("memo", ""),
                 "question_content": r.get("question_content", ""),
@@ -269,8 +291,9 @@ def post_company_report_result(req: CompanyResultRequest):
         ],
     }
 
+
 # =========================
-# 互換: /company も同じ挙動にする（うっかり全文返し防止）
+# Compat endpoints
 # =========================
 @app.post("/company")
 def post_company(req: CompanyRequest):
@@ -373,13 +396,15 @@ def company_suggest(body: SuggestRequestCompat):
     out = (prefix_hits + contains_hits)[:15]
     return {"candidates": out, "suggestions": out}
 
+
+# =========================
+# Student analysis
+# =========================
 @app.get("/api/student/analysis")
-def api_student_analysis(
-    student_id: str | None = Query(default=None),
-):
+def api_student_analysis(student_id: str | None = Query(default=None)):
     data = build_student_analysis(
         student_id=student_id,
-        use_ai=False,   # ← GETではAI絶対OFF
+        use_ai=False,  # GETではAI絶対OFF（方針通り）
     )
 
     if student_id:
@@ -393,25 +418,31 @@ def api_student_analysis(
 def api_student_analysis_post(req: StudentAnalysisRequest):
     data = build_student_analysis(
         student_id=req.student_id,
-        use_ai=True,   # ← POSTだけ強制ON
+        use_ai=bool(req.use_ai),
     )
     sid = str(req.student_id).strip()
     return {"student_id": sid, "data": data.get(sid, {})}
 
+
 class StudentSuggestRequest(BaseModel):
     keyword: str
+
 
 @app.post("/api/student/suggest")
 def api_student_suggest(req: StudentSuggestRequest):
     candidates = suggest_student_ids(req.keyword, limit=10)
     return {"candidates": candidates}
+
+
+# =========================
+# Company validate
+# =========================
 @app.post("/api/company/validate")
 def post_company_validate(req: CompanyValidateRequest):
     keyword = str(req.name or "").strip()
     if not keyword:
         return {"ok": False, "error": "企業名が空です"}
 
-    # 記号だけ等（任意：より親切にしたい場合）
     if _is_symbol_only(keyword):
         return {"ok": False, "error": "企業名に文字が含まれていません"}
 
@@ -431,9 +462,7 @@ def post_company_validate(req: CompanyValidateRequest):
 
     hit = df[df["__norm_name"] == norm_input]
     if hit.empty:
-        # ←ここが「株式会社だけ」みたいな入力を弾く条件
         return {"ok": False, "error": "データに存在しません（完全一致が必要です）"}
 
-    # 実在する会社名（表記ゆれがあってもCSV側の表記を返す）
     matched = hit.iloc[0][col_company]
     return {"ok": True, "company": str(matched).strip()}

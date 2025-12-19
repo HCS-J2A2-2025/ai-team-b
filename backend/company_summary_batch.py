@@ -1,234 +1,31 @@
-# company_summary_batch.py
+﻿# company_summary_batch.py
 # ------------------------------------------
 # data/report_t_all.csv → data/company_summary_t.csv を作成し、
 # さらに generate_detailed_report() で自然文レポートを生成する。
 # フロント右側用の面接履歴（最新10人分）/ 質問抽出 / 回次ごとの傾向も返せる。
 # ------------------------------------------
+
 import os
 import re
 import json
 from collections import Counter
+from pathlib import Path
 
 import pandas as pd
+import requests
 
 import hmac
 import hashlib
 import base64
-from pathlib import Path
-import requests
+
 # ★ これを .env / 環境変数で必ず上書きする（dev用デフォルトは仮）
 PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
 
-
-def summarize_company(group: pd.DataFrame) -> dict | None:
-    """
-    1社ぶんの report 行（group）から company_summary_t 用の1行を作る。
-    generate_detailed_report() が参照する列を必ず作る:
-      - company_name
-      - content_top_tags (JSON文字列)
-      - atmosphere_dist (JSON文字列)
-      - format_dist (JSON文字列)
-      - dress_code_dist (JSON文字列)
-      - latest_records (JSON文字列)
-    """
-
-    if group is None or group.empty:
-        return None
-
-    # 正規化後の想定列名
-    col_company = "企業名"
-    col_event = "イベント種別"
-    col_start = "開始日時"
-    col_result = "結果種別"
-    col_format = "形式"
-    col_text = "面接内容"
-    col_report_id = "レポートID"
-
-    if col_company not in group.columns:
-        return None
-
-    company_name = str(group[col_company].iloc[0]).strip()
-
-    df = group.copy()
-
-    # 面接だけ（ここは方針次第：面接以外も入れたければ外してOK）
-    if col_event in df.columns:
-        df = df[df[col_event].astype(str).str.strip() == "試験_面接"].copy()
-
-    if df.empty:
-        # 面接が無い会社は summary を作らない（必要なら空サマリ返してもOK）
-        return None
-
-    # 日付
-    if col_start in df.columns:
-        df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
-        df = df.dropna(subset=["start_dt_obj"]).copy()
-    else:
-        df["start_dt_obj"] = pd.NaT
-
-    if df.empty:
-        return None
-
-    # テキスト
-    if col_text in df.columns:
-        df["_text"] = df[col_text].fillna("").astype(str).map(clean_text)
-    else:
-        df["_text"] = ""
-
-    # ---------- 分布集計 ----------
-    atmos = Counter()
-    form = Counter()
-    dress = Counter()
-    tag_counter = Counter()
-
-    for t in df["_text"].tolist():
-        if not t:
-            continue
-        atmos[detect_atmosphere_rule(t)] += 1
-        dress[detect_dress_code(t)] += 1
-
-        # 形式は「形式列」優先。無ければ本文から推定
-        if col_format in df.columns:
-            # 形式列が "オンライン" を含むかどうかで雑に寄せる（運用に合わせて調整OK）
-            # 例: "WEB" や "オンライン(Teams)" など
-            # ※テキスト判定を混ぜたいなら detect_format(t) と併用してもOK
-            pass
-
-        form[detect_format(t)] += 1
-
-        for tg in detect_content_tags(t):
-            tag_counter[tg] += 1
-
-    # 形式列がある場合は上書き（列が信頼できるならこちらが正）
-    if col_format in df.columns:
-        form = Counter()
-        for v in df[col_format].fillna("").astype(str).tolist():
-            vv = v.strip()
-            if not vv:
-                continue
-            if "オンライン" in vv or "WEB" in vv.upper():
-                form["オンライン"] += 1
-            elif "対面" in vv or "来社" in vv:
-                form["対面"] += 1
-            else:
-                form["不明"] += 1
-
-    # タグ上位（多すぎるとLLMがうるさくなるので8個くらい）
-    top_tags = [k for k, _ in tag_counter.most_common(8)]
-
-    # ---------- latest_records ----------
-    df_latest = df.sort_values("start_dt_obj", ascending=False).head(LATEST_RECORDS_LIMIT).copy()
-
-    latest_records = []
-    for _, r in df_latest.iterrows():
-        raw_text = str(r.get(col_text, "") or "")
-        t = clean_text(raw_text)
-        rec = {
-            "start_datetime": str(r.get(col_start, "") or ""),
-            "result": str(r.get(col_result, "") or ""),
-            "format": str(r.get(col_format, "") or ""),
-            "memo": (t[:140] + "…") if len(t) > 140 else t,
-            "questions": extract_questions(raw_text, max_q=3),
-        }
-
-        # 公開用ID（report_id があれば付与）
-        rid = str(r.get(col_report_id, "") or "").strip()
-        if rid:
-            rec["public_id"] = make_public_id(rid)
-
-        latest_records.append(rec)
-
-    # ---------- 出力（company_summary_t 1行） ----------
-    row = {
-        "company_name": company_name,
-        "interview_count": int(len(df)),
-        "content_top_tags": json.dumps(top_tags, ensure_ascii=False),
-        "atmosphere_dist": json.dumps(dict(atmos), ensure_ascii=False),
-        "format_dist": json.dumps(dict(form), ensure_ascii=False),
-        "dress_code_dist": json.dumps(dict(dress), ensure_ascii=False),
-        "latest_records": json.dumps(latest_records, ensure_ascii=False),
-    }
-    return row
-
-
-
-
-
-def generate_student_ai_summary(student_id: str, max_records: int = 8) -> str:
-    df = load_report_df()
-
-    sid = str(student_id).strip()
-    df = df[df["学籍番号"].astype(str).str.strip() == sid]
-    if df.empty:
-        return ""
-
-    df["開始日時"] = pd.to_datetime(df["開始日時"], errors="coerce")
-    df = df.sort_values("開始日時", ascending=False)
-
-    texts = (
-        df["面接内容"].dropna().astype(str).tolist()[:max_records]
-    )
-
-    joined = "\n\n".join(f"- {t}" for t in texts)[:6000]
-
-    prompt = f"""
-あなたは就職活動を支援するキャリアアドバイザーです。
-以下は学籍番号 {sid} の面接レポートです。
-
-【面接ログ】
-{joined}
-
-次の観点で日本語で簡潔にまとめてください。
-1. 全体傾向
-2. 強み
-3. 注意点・改善点
-4. 次回面接への具体的アクション
-"""
-    return ask_ai(prompt)
-
-
-def ask_ai(prompt: str) -> str:
-    base = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    if not base.startswith("http://") and not base.startswith("https://"):
-        base = "http://" + base
-    url = base.rstrip("/") + "/api/generate"
-
-    model = os.getenv("OLLAMA_MODEL", "qwen2.5:14b-instruct")
-
-    try:
-        r = requests.post(
-            url,
-            json={
-                "model": "qwen2.5:14b-instruct",
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.4},
-            },
-            timeout=600,
-        )
-    except Exception as e:
-        return f"[ERROR] Ollama への接続に失敗しました: {e}"
-
-    if not r.ok:
-        return f"[ERROR] Ollama API error {r.status_code}: {r.text}"
-    return (r.json().get("response") or "").strip()
-
-
-def make_public_id(report_id: str) -> str:
-    """
-    内部の report_id を安全な公開用IDに変換する（復元不可）
-    - 同じ report_id → 常に同じ public_id
-    - SECRET が漏れない限り総当たりで推測されにくい
-    """
-    if not report_id:
-        return ""
-
-    msg = str(report_id).encode("utf-8")
-    key = PUBLIC_ID_SECRET.encode("utf-8")
-    digest = hmac.new(key, msg, hashlib.sha256).digest()
-
-    # URLでも安全な短めID
-    return base64.urlsafe_b64encode(digest[:16]).decode("utf-8").rstrip("=")
+# =========================
+# AI switches（右も左も動かす）
+# =========================
+ENABLE_LEFT_AI = True
+ENABLE_RIGHT_AI = True
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
@@ -238,10 +35,31 @@ OUTPUT_CSV = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
 LATEST_RECORDS_LIMIT = 5
 DISPLAY_RECORD_LIMIT = 10  # 右側に出す最大件数（= 最新10人分）
 
+# ====== 質問に出したくない話題（合否・内定など） ======
+QUESTION_NG_WORDS = [
+    "内定", "採用", "合格", "不合格", "落選", "結果", "通過", "辞退",
+    "合否", "選考結果", "内々定", "オファー"
+]
 
-# -----------------------------
-# CSVを読み込んでカラム名を正規化（BOM / 空白 / 表記揺れなど）
-# -----------------------------
+# ====== タグ抽出 ======
+CONTENT_TAG_RULES = {
+    "志望動機": ["志望動機", "なぜこの会社", "なぜ当社"],
+    "学校で学んだこと": ["学校で", "授業で", "学んだ", "カリキュラム"],
+    "チーム開発": ["チーム開発", "グループ開発", "共同開発"],
+    "アルバイト経験": ["アルバイト", "バイト"],
+    "強み・弱み": ["長所", "短所", "強み", "弱み"],
+    "将来のキャリア": ["キャリア", "将来"],
+    "成績": ["成績", "順位"],
+    "家族・家庭": ["家族", "家庭"],
+    "コミュニケーション": ["コミュニケーション"],
+    "自己PR": ["自己PR"],
+    "逆質問": ["逆質問"],
+}
+
+
+# ============================================================
+# 共通：CSV読み込み（BOM / 空白 / 表記揺れの吸収）
+# ============================================================
 def load_report_df():
     df = pd.read_csv(INPUT_CSV, encoding="utf-8-sig")
 
@@ -301,11 +119,13 @@ def load_report_df():
 
     if rename_map:
         df = df.rename(columns=rename_map)
-        
+
     return df
 
 
-# ====== テキスト整形 ======
+# ============================================================
+# テキスト整形
+# ============================================================
 def clean_text(text):
     if not isinstance(text, str):
         return ""
@@ -315,27 +135,9 @@ def clean_text(text):
     return text.strip()
 
 
-# ====== タグ抽出 ======
-CONTENT_TAG_RULES = {
-    "志望動機": ["志望動機", "なぜこの会社", "なぜ当社"],
-    "学校で学んだこと": ["学校で", "授業で", "学んだ", "カリキュラム"],
-    "チーム開発": ["チーム開発", "グループ開発", "共同開発"],
-    "アルバイト経験": ["アルバイト", "バイト"],
-    "強み・弱み": ["長所", "短所", "強み", "弱み"],
-    "将来のキャリア": ["キャリア", "将来"],
-    "成績": ["成績", "順位"],
-    "家族・家庭": ["家族", "家庭"],
-    "コミュニケーション": ["コミュニケーション"],
-    "自己PR": ["自己PR"],
-    "逆質問": ["逆質問"],
-}
-# ====== 質問に出したくない話題（合否・内定など） ======
-QUESTION_NG_WORDS = [
-    "内定", "採用", "合格", "不合格", "落選", "結果", "通過", "辞退",
-    "合否", "選考結果", "内々定", "オファー"
-]
-
-
+# ============================================================
+# ルール抽出（タグ/形式/服装/雰囲気）
+# ============================================================
 def detect_content_tags(text):
     if not isinstance(text, str):
         return []
@@ -382,7 +184,9 @@ def detect_atmosphere_rule(text):
     return top if score[top] > 0 else "不明"
 
 
-# ====== 質問抽出 ======
+# ============================================================
+# 質問抽出（ルール）
+# ============================================================
 def extract_questions(text: str, max_q: int = 6) -> list[str]:
     if not isinstance(text, str):
         return []
@@ -464,23 +268,9 @@ def extract_questions(text: str, max_q: int = 6) -> list[str]:
 
 
 # ============================================================
-# ★重要：回次ラベル（2回目が最終になるケース対応）
+# 回次ラベル（2回目が最終になるケース対応）
 # ============================================================
 def calc_round_label(round_index: int, total_rounds: int) -> str:
-    """
-    round_index : 1,2,3...
-    total_rounds: その学生がその企業で受けた面接総数
-
-    ルール:
-    - 表示は「一次面接 / 二次面接 / 三次面接 / 最終面接」の4種類に統一
-    - total_rounds >= 4 の場合:
-        1->一次, 2->二次, 3->三次, 4以降->最終
-    - total_rounds <= 3 の場合:
-        最後の回は必ず最終（2回で最終などに対応）
-        それ以外は一次/二次/三次を割当
-    """
-
-    # --- 入力を安全にする ---
     try:
         round_index = int(round_index)
     except Exception:
@@ -496,11 +286,9 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
     if total_rounds <= 0:
         total_rounds = 1
 
-    # round_index が total を超える異常値も最後扱いに寄せる
     if round_index > total_rounds:
         round_index = total_rounds
 
-    # --- 4回以上は「一次/二次/三次/最終」に丸める ---
     if total_rounds >= 4:
         if round_index == 1:
             return "一次面接"
@@ -510,11 +298,9 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
             return "三次面接"
         return "最終面接"
 
-    # --- 1〜3回のとき：最後は必ず最終（2回で最終など） ---
     if round_index == total_rounds:
         return "最終面接"
 
-    # 最後以外は順番通り
     if round_index == 1:
         return "一次面接"
     if round_index == 2:
@@ -522,19 +308,244 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
     return "三次面接"
 
 
+# ============================================================
+# 公開ID
+# ============================================================
+def make_public_id(report_id: str) -> str:
+    if not report_id:
+        return ""
+    msg = str(report_id).encode("utf-8")
+    key = PUBLIC_ID_SECRET.encode("utf-8")
+    digest = hmac.new(key, msg, hashlib.sha256).digest()
+    return base64.urlsafe_b64encode(digest[:16]).decode("utf-8").rstrip("=")
 
-# ====== LLM による自然文レポート生成 ======
+
+# ============================================================
+# AI 呼び出し（統一：system + user 対応）
+# ============================================================
+def ask_ai(user_prompt: str, system_prompt: str | None = None) -> str:
+    base = str(os.getenv("OLLAMA_HOST", "http://localhost:11434") or "").strip()
+    if not base.startswith(("http://", "https://")):
+        base = "http://" + base
+    url = base.rstrip("/") + "/api/generate"
+
+    model = str(os.getenv("OLLAMA_MODEL", "qwen2.5:14b-instruct") or "").strip()
+    if not model:
+        model = "qwen2.5:14b-instruct"
+
+    prompt = user_prompt if not system_prompt else (system_prompt.strip() + "\n\n" + user_prompt.strip())
+
+    try:
+        r = requests.post(
+            url,
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {"temperature": 0.4},
+            },
+            timeout=600,
+        )
+    except Exception as e:
+        return f"[ERROR] Ollama への接続に失敗しました: {e}"
+
+    if not r.ok:
+        return f"[ERROR] Ollama API error {r.status_code}: {r.text}"
+
+    data = r.json() or {}
+    return (data.get("response") or "").strip()
+
+
+# ============================================================
+# JSON取り出し（LLMが前後に余計な文章を付けても救う）
+# ============================================================
+def _extract_json_object(text: str) -> dict | None:
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+
+    # 1) まず素直に
+    try:
+        obj = json.loads(s)
+        if isinstance(obj, dict):
+            return obj
+    except Exception:
+        pass
+
+    # 2) ```json ... ``` の中
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", s, flags=re.IGNORECASE)
+    if m:
+        inner = m.group(1).strip()
+        try:
+            obj = json.loads(inner)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+    # 3) 最初の { と最後の } で切り出す
+    l = s.find("{")
+    r = s.rfind("}")
+    if l != -1 and r != -1 and r > l:
+        inner = s[l:r+1]
+        try:
+            obj = json.loads(inner)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            return None
+
+    return None
+
+
+# ============================================================
+# 質問文っぽく正規化
+# ============================================================
+def normalize_to_question(sentence: str) -> str:
+    if not isinstance(sentence, str):
+        return ""
+
+    s = re.sub(r"\s+", " ", sentence).strip()
+    if not s:
+        return ""
+
+    s = s.rstrip("。．!！")
+
+    already_question = (
+        "教えてください" in s
+        or "伺えますか" in s
+        or "お願いします" in s
+        or "ありますか" in s
+        or "できますか" in s
+        or s.endswith("か")
+        or "？" in s
+        or "?" in s
+    )
+
+    if "について教えてください" in s or "について教えて下さい" in s:
+        s = s.replace("。について教えてください", "について教えてください")
+        s = s.replace("。について教えて下さい", "について教えて下さい")
+        s = re.sub(r"(について教えてください。?)+$", "について教えてください", s)
+        return s if s.endswith("？") or s.endswith("。") else s + "。"
+
+    if already_question:
+        if ("？" not in s) and ("?" not in s) and not s.endswith("。"):
+            if s.endswith("か"):
+                return s + "？"
+            return s + "。"
+        return s
+
+    s = re.sub(r"(が評価された|が確認された|が見られた|が高い|が強い|が必要|と感じた|と思った)$", "", s).strip()
+
+    if s.endswith("について") or s.endswith("に関して"):
+        return s + "教えてください。"
+
+    return f"{s}について教えてください。"
+
+
+# ============================================================
+# 右AI：質問TOP + memo を LLM で生成
+# ============================================================
+def build_right_ai_questions_and_memo(
+    company_name: str,
+    round_label: str,
+    texts: list[str],
+    top_k: int = 5,
+) -> tuple[list[str], str]:
+    cleaned = [clean_text(t) for t in texts if isinstance(t, str) and t.strip()]
+    if not cleaned:
+        return [], ""
+
+    joined = "\n\n".join(f"- {t[:700]}" for t in cleaned[:8])
+    joined = joined[:6000]
+
+    system = f"""
+あなたはキャリアセンターの面接分析アシスタントです。
+
+【絶対ルール】
+- 出力は日本語のみ
+- 推測で事実を足さない
+- 評価文（「〜が評価された」「〜が不足」等）を質問に変換しない
+- 面接で“聞かれる形”に言い換えはOKだが、ログから逸脱しない
+- 合否/内定/結果の話題は質問に出さない
+
+【出力フォーマット（JSONのみ）】
+{{
+  "questions": ["..."],
+  "memo": "..."
+}}
+
+- questions は最大 {top_k} 個
+- memo は1〜2文（短く）
+""".strip()
+
+    user = f"""
+企業: {company_name}
+回次: {round_label}
+
+【面接ログ】
+{joined}
+""".strip()
+
+    raw = ask_ai(user, system_prompt=system)
+
+    obj = _extract_json_object(raw)
+    if not obj:
+        return [], ""
+
+    qs = obj.get("questions", [])
+    memo = obj.get("memo", "")
+
+    if not isinstance(qs, list):
+        qs = []
+
+    out_qs = []
+    for q in qs:
+        s = re.sub(r"\s+", " ", str(q)).strip()
+        if not s:
+            continue
+        if any(w in s for w in QUESTION_NG_WORDS):
+            continue
+        s = normalize_to_question(s)
+        out_qs.append(s)
+
+    out_qs = out_qs[:top_k]
+    memo = re.sub(r"\s+", " ", str(memo)).strip()
+
+    return out_qs, memo
+
+
+# ============================================================
+# 左AI：企業の自然文レポート
+# ============================================================
 def generate_detailed_report(row: pd.Series) -> str:
-    import requests
+    if not ENABLE_LEFT_AI:
+        return ""
 
-    company_name = row["company_name"]
-    tags = json.loads(row["content_top_tags"])
-    atmos = json.loads(row["atmosphere_dist"])
-    form = json.loads(row["format_dist"])
-    dress = json.loads(row["dress_code_dist"])
-    latest = json.loads(row["latest_records"])
+    company_name = str(row.get("company_name", "") or "").strip()
+    if not company_name:
+        return ""
 
-    SYSTEM_PROMPT = """
+    def _load_json(val, default):
+        try:
+            if val is None:
+                return default
+            if isinstance(val, (list, dict)):
+                return val
+            s = str(val).strip()
+            if not s:
+                return default
+            return json.loads(s)
+        except Exception:
+            return default
+
+    tags = _load_json(row.get("content_top_tags"), [])
+    atmos = _load_json(row.get("atmosphere_dist"), {})
+    form = _load_json(row.get("format_dist"), {})
+    dress = _load_json(row.get("dress_code_dist"), {})
+    latest = _load_json(row.get("latest_records"), [])
+
+    system = """
 あなたは「日本語文章生成の専門家」かつ「キャリアセンターのプロアドバイザー」です。
 
 【最重要ルール】
@@ -563,9 +574,9 @@ def generate_detailed_report(row: pd.Series) -> str:
 
 ※データにない情報を無理に推測して書かないこと。
 ※英語は禁止。出力はすべて自然な日本語のみとすること。
-"""
+""".strip()
 
-    USER_PROMPT = f"""
+    user = f"""
 以下は企業「{company_name}」に関する面接データです。
 このデータだけをもとに、指定された４ブロック構成でレポートを作成してください。
 
@@ -583,38 +594,165 @@ def generate_detailed_report(row: pd.Series) -> str:
 
 【直近の面接記録】
 {latest}
-"""
+""".strip()
 
-    base = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    if not base.startswith("http://") and not base.startswith("https://"):
-        base = "http://" + base
-    url = base.rstrip("/") + "/api/generate"
-    prompt = SYSTEM_PROMPT.strip() + "\n\n" + USER_PROMPT.strip()
-
-    try:
-        response = requests.post(
-            url,
-            json={
-                "model": "qwen2.5:14b-instruct",
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.4},
-            },
-            timeout=600,
-        )
-    except Exception as e:
-        return f"[ERROR] Ollama への接続に失敗しました: {e}"
-
-    if not response.ok:
-        return f"[ERROR] Ollama API error {response.status_code}: {response.text}"
-
-    data = response.json()
-    return data.get("response", "").strip() or "[ERROR] Ollama から空の応答が返されました"
+    out = ask_ai(user, system_prompt=system)
+    # 左側はエラー文字列を出したくないならここで "" にしてもOK
+    if out.startswith("[ERROR]"):
+        return out
+    return out.strip()
 
 
 # ============================================================
-# ★右側：最新10人分（学籍番号ごとの最新1件）を records として返す
-#   ただし title は「その人の総回数」を見て最終判定する
+# 学生AI：学生の面接ログ要約
+# ============================================================
+def generate_student_ai_summary(student_id: str, max_records: int = 8) -> str:
+    df = load_report_df()
+    sid = str(student_id).strip()
+
+    if "学籍番号" not in df.columns:
+        return ""
+    if "開始日時" not in df.columns or "面接内容" not in df.columns:
+        return ""
+
+    df = df[df["学籍番号"].astype(str).str.strip() == sid]
+    if df.empty:
+        return ""
+
+    df["開始日時"] = pd.to_datetime(df["開始日時"], errors="coerce")
+    df = df.dropna(subset=["開始日時"]).sort_values("開始日時", ascending=False)
+
+    texts = df["面接内容"].dropna().astype(str).tolist()[:max_records]
+    joined = "\n\n".join(f"- {t}" for t in texts)[:6000]
+
+    system = "あなたは就職活動を支援するキャリアアドバイザーです。出力は日本語のみ。推測で事実を足さない。"
+
+    user = f"""
+以下は学籍番号 {sid} の面接レポートです。
+
+【面接ログ】
+{joined}
+
+次の観点で日本語で簡潔にまとめてください。
+1. 全体傾向
+2. 強み
+3. 注意点・改善点
+4. 次回面接への具体的アクション
+""".strip()
+
+    out = ask_ai(user, system_prompt=system)
+    if out.startswith("[ERROR]"):
+        return out
+    return out.strip()
+
+
+# ============================================================
+# 企業サマリ（company_summary_t の1行を作る）
+# ============================================================
+def summarize_company(group: pd.DataFrame) -> dict | None:
+    if group is None or group.empty:
+        return None
+
+    col_company = "企業名"
+    col_event = "イベント種別"
+    col_start = "開始日時"
+    col_result = "結果種別"
+    col_format = "形式"
+    col_text = "面接内容"
+    col_report_id = "レポートID"
+
+    if col_company not in group.columns:
+        return None
+
+    company_name = str(group[col_company].iloc[0]).strip()
+    df = group.copy()
+
+    # 面接だけ
+    if col_event in df.columns:
+        df = df[df[col_event].astype(str).str.strip() == "試験_面接"].copy()
+    if df.empty:
+        return None
+
+    # 日付
+    if col_start in df.columns:
+        df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
+        df = df.dropna(subset=["start_dt_obj"]).copy()
+    else:
+        df["start_dt_obj"] = pd.NaT
+    if df.empty:
+        return None
+
+    # テキスト
+    if col_text in df.columns:
+        df["_text"] = df[col_text].fillna("").astype(str).map(clean_text)
+    else:
+        df["_text"] = ""
+
+    atmos = Counter()
+    form = Counter()
+    dress = Counter()
+    tag_counter = Counter()
+
+    for t in df["_text"].tolist():
+        if not t:
+            continue
+        atmos[detect_atmosphere_rule(t)] += 1
+        dress[detect_dress_code(t)] += 1
+        form[detect_format(t)] += 1
+        for tg in detect_content_tags(t):
+            tag_counter[tg] += 1
+
+    # 形式列がある場合は上書き（列が信頼できるならこちらが正）
+    if col_format in df.columns:
+        form = Counter()
+        for v in df[col_format].fillna("").astype(str).tolist():
+            vv = v.strip()
+            if not vv:
+                continue
+            if "オンライン" in vv or "WEB" in vv.upper():
+                form["オンライン"] += 1
+            elif "対面" in vv or "来社" in vv:
+                form["対面"] += 1
+            else:
+                form["不明"] += 1
+
+    top_tags = [k for k, _ in tag_counter.most_common(8)]
+
+    # latest_records
+    df_latest = df.sort_values("start_dt_obj", ascending=False).head(LATEST_RECORDS_LIMIT).copy()
+    latest_records = []
+    for _, r in df_latest.iterrows():
+        raw_text = str(r.get(col_text, "") or "")
+        t = clean_text(raw_text)
+        rec = {
+            "start_datetime": str(r.get(col_start, "") or ""),
+            "result": str(r.get(col_result, "") or ""),
+            "format": str(r.get(col_format, "") or ""),
+            "memo": (t[:140] + "…") if len(t) > 140 else t,
+            "questions": extract_questions(raw_text, max_q=3),
+        }
+
+        rid = str(r.get(col_report_id, "") or "").strip()
+        if rid:
+            rec["public_id"] = make_public_id(rid)
+
+        latest_records.append(rec)
+
+    row = {
+        "company_name": company_name,
+        "interview_count": int(len(df)),
+        "content_top_tags": json.dumps(top_tags, ensure_ascii=False),
+        "atmosphere_dist": json.dumps(dict(atmos), ensure_ascii=False),
+        "format_dist": json.dumps(dict(form), ensure_ascii=False),
+        "dress_code_dist": json.dumps(dict(dress), ensure_ascii=False),
+        "latest_records": json.dumps(latest_records, ensure_ascii=False),
+    }
+    return row
+
+
+# ============================================================
+# 右側：最新10人分（学籍番号ごとの最新1件）を records として返す
+#   右AI ONなら：回次ごとの質問TOP5 + メモを LLM 生成
 # ============================================================
 def build_interview_records_for_company(company_name: str, student_no: str | None = None):
     df = load_report_df()
@@ -626,7 +764,6 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     col_format = "形式"
     col_student = "学籍番号"
     col_text = "面接内容"
-    col_report_id = "レポートID"
 
     required = [col_company, col_event, col_result, col_start, col_format, col_text]
     if not set(required).issubset(df.columns):
@@ -634,9 +771,12 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         return []
 
     target_name = str(company_name).strip()
+    if not target_name:
+        return []
+
     company_series = df[col_company].astype(str).str.strip()
 
-    # 企業フィルタ（完全一致→ダメなら部分一致）
+    # 完全一致→ダメなら部分一致
     df_company = df[company_series == target_name].copy()
     if df_company.empty:
         df_company = df[company_series.str.contains(target_name, na=False, regex=False)].copy()
@@ -672,20 +812,13 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     df_iv["round_index"] = df_iv.groupby("_student_key").cumcount() + 1
     total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
 
-    # ---------------------------------------------------
-    # ★ 10人分を集計する（最新10人）
-    # ---------------------------------------------------
-    latest_dt_per_student = (
-        df_iv.groupby("_student_key")["start_dt_obj"]
-            .max()
-            .sort_values(ascending=False)
-    )
+    # 最新10人
+    latest_dt_per_student = df_iv.groupby("_student_key")["start_dt_obj"].max().sort_values(ascending=False)
     latest_student_keys = latest_dt_per_student.head(DISPLAY_RECORD_LIMIT).index.tolist()
     df_top = df_iv[df_iv["_student_key"].isin(latest_student_keys)].copy()
     if df_top.empty:
         return []
 
-    # ラベル付け（一次/二次/三次/最終）
     def _round_label(row):
         key = str(row.get("_student_key", "UNKNOWN"))
         total = int(total_rounds_map.get(key, int(row.get("round_index", 1))))
@@ -696,344 +829,124 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
 
     ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
 
+    # 評価文除外など（AI後にも軽く通す）
+    EVAL_PHRASES = [
+        "評価", "懸念", "不足", "見られ", "必要", "できた", "できて", "できる",
+        "感じた", "思った", "だった", "であった", "が高い", "が低い", "が強い",
+        "が弱い", "不足して", "欠け", "ミスマッチ", "払拭", "内定", "合格", "不合格"
+    ]
+    QUESTION_CUES = [
+        "何", "なぜ", "どう", "どの", "いつ", "どれ", "理由", "きっかけ", "具体的",
+        "説明", "教えて", "伺", "ありますか", "できますか", "ですか"
+    ]
+
+    def _is_good_question(q: str) -> bool:
+        if not isinstance(q, str):
+            return False
+        s = re.sub(r"\s+", " ", q).strip()
+        if not s:
+            return False
+        if any(w in s for w in QUESTION_NG_WORDS):
+            return False
+        if len(s) < 8 or len(s) > 80:
+            return False
+
+        has_qmark = ("？" in s) or ("?" in s)
+        has_cue = any(c in s for c in QUESTION_CUES)
+        evalish = any(p in s for p in EVAL_PHRASES)
+        if evalish and not (has_qmark or has_cue):
+            return False
+
+        if s.endswith("について教えてください。") or s.endswith("について教えてください") or s.endswith("について教えて下さい。"):
+            core = re.sub(r"(について教えてください。?|について教えて下さい。?)$", "", s).strip()
+            if re.search(r"(できた|できて|評価された|不足していた|懸念が残った|払拭した)$", core):
+                return False
+
+        return True
+
     records = []
     for label in ordered_labels:
         sub = df_top[df_top["round_label"] == label].copy()
         if sub.empty:
             continue
 
-        # よくある形式（オンライン/対面）
         types = []
         all_questions = []
         memos = []
+        round_texts_for_ai = []
 
         for _, r in sub.iterrows():
-            # type
-            fmt_val = str(r.get(col_format, ""))
-            types.append("オンライン" if "オンライン" in fmt_val else "対面")
+            fmt_val = str(r.get(col_format, "") or "")
+            types.append("オンライン" if ("オンライン" in fmt_val or "WEB" in fmt_val.upper()) else "対面")
 
-            # questions
             raw_text = str(r.get(col_text, "") or "")
-            qs_raw = extract_questions(raw_text, max_q=10)  # 少し多めに拾ってから落とす
+            if raw_text.strip():
+                round_texts_for_ai.append(raw_text)
 
+            # フォールバック用：ルール抽出
+            qs_raw = extract_questions(raw_text, max_q=12)
             qs = []
             for q in qs_raw:
-                # 内定/合否系は除外
                 if any(w in q for w in QUESTION_NG_WORDS):
                     continue
-
                 q2 = normalize_to_question(q)
-
-                # 変なのを軽く除外（短すぎ/長すぎ）
-                if 8 <= len(q2) <= 60 and (not any(w in q2 for w in QUESTION_NG_WORDS)):
+                if _is_good_question(q2):
                     qs.append(q2)
-
-            # ここで上位5つだけにする
             qs = qs[:5]
-
             all_questions.extend(qs)
 
-            # memo（雰囲気的な要約を短く：上位の内容をつなぐ）
             t = clean_text(raw_text)
             if t:
                 memos.append(t[:120])
 
-        # 質問：頻出順に並べる（最大5個）
-        q_counter = Counter([q.strip() for q in all_questions if q.strip()])
-        top_questions = [q for q, _ in q_counter.most_common(5)]
-
-        # type：多数決
         type_label = Counter(types).most_common(1)[0][0] if types else ""
 
-        # memo：代表文（長すぎないように）
-        memo_text = " / ".join(memos[:2])
-        memo_text = memo_text[:180] + ("…" if len(memo_text) > 180 else "")
+        top_questions = []
+        memo_text = ""
 
-        # UI互換で返す（4枚になる）
+        # 右AI（失敗したらフォールバック）
+        if ENABLE_RIGHT_AI:
+            qs_ai, memo_ai = build_right_ai_questions_and_memo(
+                company_name=str(company_name).strip(),
+                round_label=label,
+                texts=round_texts_for_ai,
+                top_k=5,
+            )
+            qs_ai = [normalize_to_question(q) for q in qs_ai]
+            qs_ai = [q for q in qs_ai if _is_good_question(q)]
+            if qs_ai:
+                top_questions = qs_ai[:5]
+            if isinstance(memo_ai, str) and memo_ai.strip():
+                memo_text = memo_ai.strip()
+
+        if not top_questions:
+            q_counter = Counter([q.strip() for q in all_questions if q.strip()])
+            top_questions = [q for q, _ in q_counter.most_common(5)]
+
+        if not memo_text:
+            memo_text = " / ".join(memos[:2]).strip()
+            memo_text = memo_text[:180] + ("…" if len(memo_text) > 180 else "")
+
         records.append(
             {
-                "id": label,                 # 4枚なので label をIDに
-                "title": label,              # 一次/二次/三次/最終
-                "year": "",                  # 必要なら後で入れる
+                "id": label,
+                "title": label,
+                "year": "",
                 "term": "",
-                "status": f"{len(sub)}件",   # 右のバッジを件数に
-                "type": type_label,          # 多数派の形式
-                "questions": top_questions,  # ← ここが「質問内容」に出る
-                "memo": memo_text,           # 代表メモ
-                "start_datetime": "",        # 使わないなら空でOK
+                "status": f"{len(sub)}件",
+                "type": type_label,
+                "questions": top_questions,
+                "memo": memo_text,
+                "start_datetime": "",
             }
         )
 
     return records
 
-def normalize_to_question(sentence: str) -> str:
-    """
-    文章を「面接で聞かれた質問文」っぽく正規化する
-    - すでに質問なら整形だけ
-    - 「〜について教えてください」などの重複を防ぐ
-    """
-    if not isinstance(sentence, str):
-        return ""
-
-    s = re.sub(r"\s+", " ", sentence).strip()
-    if not s:
-        return ""
-
-    # 末尾の句点/読点などを軽く整理
-    s = s.rstrip("。．!！")
-
-    # すでに質問っぽい終わり方の定型
-    already_question = (
-        "教えてください" in s
-        or "伺えますか" in s
-        or "お願いします" in s
-        or "ありますか" in s
-        or "できますか" in s
-        or s.endswith("か")
-        or "？" in s
-        or "?" in s
-    )
-
-    # すでに「〜について教えてください」が入ってるなら余計な付与をしない
-    if "について教えてください" in s or "について教えて下さい" in s:
-        # 「。について教えてください。」みたいな変な連結があれば修正
-        s = s.replace("。について教えてください", "について教えてください")
-        s = s.replace("。について教えて下さい", "について教えて下さい")
-        # 「について教えてください。について教えてください」重複除去
-        s = re.sub(r"(について教えてください。?)+$", "について教えてください", s)
-        return s if s.endswith("？") or s.endswith("。") else s + "。"
-
-    # すでに質問文なら、最後だけ整える
-    if already_question:
-        if ("？" not in s) and ("?" not in s) and not s.endswith("。"):
-            # 「〜ですか」系は「？」に寄せる
-            if s.endswith("か"):
-                return s + "？"
-            return s + "。"
-        return s
-
-    # 評価/感想っぽい語尾を除去
-    s = re.sub(r"(が評価された|が確認された|が見られた|が高い|が強い|が必要|と感じた|と思った)$", "", s).strip()
-
-    # 「〜について」だけで終わってたら「教えてください」を付ける
-    if s.endswith("について") or s.endswith("に関して"):
-        return s + "教えてください。"
-
-    # それ以外はテンプレ質問にする
-    return f"{s}について教えてください。"
-
 
 # ============================================================
-# ★企業ごと：一次→二次→三次→最終 の順で「傾向」を返す
-#   ※ round_index==4 を最終と決め打ちしない（2回で最終もある）
+# 最新 N 件の生テキスト取得
 # ============================================================
-def summarize_latest_trends_by_round(company_name: str, limit_records: int = 50) -> dict:
-    df = load_report_df()
-
-    col_company = "企業名"
-    col_event = "イベント種別"
-    col_start = "開始日時"
-    col_text = "面接内容"
-    col_student = "学籍番号"
-
-    required = [col_company, col_event, col_start, col_text]
-    if not set(required).issubset(df.columns):
-        return {}
-
-    df = df[
-        (df[col_company].astype(str).str.strip() == str(company_name).strip()) &
-        (df[col_event].astype(str).str.strip() == "試験_面接")
-    ].copy()
-
-    if df.empty:
-        return {}
-
-    df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
-    df = df.dropna(subset=["start_dt_obj"]).copy()
-    if df.empty:
-        return {}
-
-    # 学籍番号キー
-    if col_student in df.columns:
-        df["_student_key"] = df[col_student].astype(str).fillna("").str.strip()
-        df.loc[df["_student_key"] == "", "_student_key"] = "UNKNOWN"
-    else:
-        df["_student_key"] = "UNKNOWN"
-
-    # 何回目（学籍番号ごと）
-    df = df.sort_values(["_student_key", "start_dt_obj"])
-    df["round_index"] = df.groupby("_student_key").cumcount() + 1
-
-    # 総回数（学籍番号ごと）
-    total_rounds_map = df.groupby("_student_key")["round_index"].max().to_dict()
-
-    # 直近 limit_records 件（新しい順）
-    df_latest = df.sort_values("start_dt_obj", ascending=False).head(limit_records).copy()
-
-    # ★各行を「一次/二次/三次/最終」に分類（総回数を見て最終判定）
-    def classify_row(r) -> str:
-        key = str(r.get("_student_key", "UNKNOWN"))
-        total = int(total_rounds_map.get(key, int(r.get("round_index", 1))))
-        idx = int(r.get("round_index", 1))
-        return calc_round_label(idx, total)
-
-    df_latest["round_label"] = df_latest.apply(classify_row, axis=1)
-
-    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
-
-    result = {}
-    for label in ordered_labels:
-        sub = df_latest[df_latest["round_label"] == label]
-        if sub.empty:
-            continue
-
-        atmospheres, formats, dresses = [], [], []
-        question_tags, extracted_questions = [], []
-
-        for _, r in sub.iterrows():
-            text = clean_text(str(r.get(col_text, "") or ""))
-            atmospheres.append(detect_atmosphere_rule(text))
-            formats.append(detect_format(text))
-            dresses.append(detect_dress_code(text))
-            question_tags.extend(detect_content_tags(text))
-            extracted_questions.extend(extract_questions(text, max_q=3))
-
-        result[label] = {
-            "atmosphere": [k for k, _ in Counter(atmospheres).most_common(2)],
-            "format": [k for k, _ in Counter(formats).most_common(2)],
-            "dress": [k for k, _ in Counter(dresses).most_common(2)],
-            "question_tags": [k for k, _ in Counter(question_tags).most_common(5)],
-            "sample_questions": list(dict.fromkeys(extracted_questions))[:5],
-            "count": int(len(sub)),
-        }
-
-    return result
-
-def summarize_questions_by_round_for_latest_students(
-    company_name: str,
-    latest_students: int = 10,
-    max_questions_per_record: int = 6,
-    top_k: int = 5,
-) -> dict:
-    """
-    企業×回次で、最新N人分の質問を集計して返す
-    - 頻出質問: 人数カウント付き
-    - 特徴的質問: 低頻度（1〜2人）だが内容が具体的なもの
-    """
-
-    df = load_report_df()
-
-    col_company = "企業名"
-    col_event = "イベント種別"
-    col_start = "開始日時"
-    col_text = "面接内容"
-    col_student = "学籍番号"
-
-    required = [col_company, col_event, col_start, col_text]
-    if not set(required).issubset(df.columns):
-        return {}
-
-    # 対象企業・面接のみ
-    df = df[
-        (df[col_company].astype(str).str.strip() == str(company_name).strip()) &
-        (df[col_event].astype(str).str.strip() == "試験_面接")
-    ].copy()
-    if df.empty:
-        return {}
-
-    # 日付整形
-    df["start_dt_obj"] = pd.to_datetime(df[col_start], errors="coerce")
-    df = df.dropna(subset=["start_dt_obj"]).copy()
-    if df.empty:
-        return {}
-
-    # 学籍番号キー
-    if col_student in df.columns:
-        df["_student_key"] = df[col_student].astype(str).fillna("").str.strip()
-        df.loc[df["_student_key"] == "", "_student_key"] = "UNKNOWN"
-    else:
-        # 学籍番号が無いなら「全員UNKNOWN」になり10人集計ができないので注意
-        df["_student_key"] = "UNKNOWN"
-
-    # round_index付与
-    df = df.sort_values(["_student_key", "start_dt_obj"])
-    df["round_index"] = df.groupby("_student_key").cumcount() + 1
-    total_rounds_map = df.groupby("_student_key")["round_index"].max().to_dict()
-
-    # 最新N人を決める（各人の最新日時でランキング）
-    latest_dt_per_student = df.groupby("_student_key")["start_dt_obj"].max().sort_values(ascending=False)
-    latest_student_keys = latest_dt_per_student.head(latest_students).index.tolist()
-
-    df = df[df["_student_key"].isin(latest_student_keys)].copy()
-    if df.empty:
-        return {}
-
-    # round_label付与（最終判定は総回数ベース）
-    def classify_row(r) -> str:
-        key = str(r.get("_student_key", "UNKNOWN"))
-        total = int(total_rounds_map.get(key, int(r.get("round_index", 1))))
-        idx = int(r.get("round_index", 1))
-        return calc_round_label(idx, total)
-
-    df["round_label"] = df.apply(classify_row, axis=1)
-
-    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
-    out = {}
-
-    # ★質問を軽く正規化（見た目違いをまとめる）
-    def normalize_question(q: str) -> str:
-        q = re.sub(r"\s+", " ", str(q)).strip()
-        q = q.replace("？", "?")
-        q = re.sub(r"[?]+$", "？", q)  # 末尾は「？」に統一
-        q = re.sub(r"^(Q\d+\.?\s*)", "", q, flags=re.IGNORECASE)
-        return q
-
-    for label in ordered_labels:
-        sub = df[df["round_label"] == label].copy()
-        if sub.empty:
-            continue
-
-        # 質問 -> その質問を出した学生集合（人数カウント）
-        q_to_students = {}
-
-        for _, r in sub.iterrows():
-            key = str(r.get("_student_key", "UNKNOWN"))
-            text = clean_text(str(r.get(col_text, "") or ""))
-
-            qs = extract_questions(text, max_q=max_questions_per_record)
-            for q in qs:
-                nq = normalize_question(q)
-                if not nq:
-                    continue
-                q_to_students.setdefault(nq, set()).add(key)
-
-        # 頻出順
-        freq = [(q, len(students)) for q, students in q_to_students.items()]
-        freq.sort(key=lambda x: x[1], reverse=True)
-
-        top_questions = []
-        for q, cnt in freq[:top_k]:
-            top_questions.append({"q": q, "count": cnt})
-
-        # 特徴的（例：1人 or 2人、かつ長めで具体的な質問）
-        unique_questions = []
-        for q, cnt in freq:
-            if cnt <= 2 and len(q) >= 14:
-                unique_questions.append({"q": q, "count": cnt})
-            if len(unique_questions) >= top_k:
-                break
-
-        out[label] = {
-            "student_count": int(sub["_student_key"].nunique()),
-            "top_questions": top_questions,
-            "unique_questions": unique_questions,
-        }
-
-    return out
-
-
-
-# ====== 最新 N 件の生テキスト取得 ======
 def get_latest_interview_texts(company_name: str, limit: int = 5):
     df = load_report_df()
 
@@ -1047,8 +960,8 @@ def get_latest_interview_texts(company_name: str, limit: int = 5):
         return []
 
     df = df[
-        df[col_company].astype(str).str.contains(company_name, na=False, regex=False) &
-        (df[col_event].astype(str).str.strip() == "試験_面接")
+        df[col_company].astype(str).str.contains(company_name, na=False, regex=False)
+        & (df[col_event].astype(str).str.strip() == "試験_面接")
     ].copy()
 
     if df.empty:
@@ -1065,7 +978,9 @@ def get_latest_interview_texts(company_name: str, limit: int = 5):
     return texts
 
 
-# ====== main ======
+# ============================================================
+# main（CSV集計して company_summary_t.csv を作る）
+# ============================================================
 def main():
     print("📁 report_t_all CSV 読み込み中...")
     df = load_report_df()
@@ -1102,14 +1017,6 @@ def main():
     print(f"📌 自然文レポート：{row['company_name']}")
     print("==============================\n")
     print(generate_detailed_report(row))
-
-    # おまけ：傾向を表示したい場合
-    trends = summarize_latest_trends_by_round(str(row["company_name"]), limit_records=50)
-    if trends:
-        print("\n==============================")
-        print("📌 回次ごとの最新傾向（一次→二次→三次→最終）")
-        print("==============================")
-        print(json.dumps(trends, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":
