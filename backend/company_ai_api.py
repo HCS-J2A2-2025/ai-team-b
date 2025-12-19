@@ -75,7 +75,8 @@ class CompanyResultRequest(BaseModel):
 class StudentAnalysisRequest(BaseModel):
     student_id: str
     use_ai: bool = True
-
+class CompanyValidateRequest(BaseModel):
+    name: str
 def _normalize_company_name(s: str) -> str:
     return re.sub(r"\s+", "", s or "").strip()
 
@@ -404,3 +405,35 @@ class StudentSuggestRequest(BaseModel):
 def api_student_suggest(req: StudentSuggestRequest):
     candidates = suggest_student_ids(req.keyword, limit=10)
     return {"candidates": candidates}
+@app.post("/api/company/validate")
+def post_company_validate(req: CompanyValidateRequest):
+    keyword = str(req.name or "").strip()
+    if not keyword:
+        return {"ok": False, "error": "企業名が空です"}
+
+    # 記号だけ等（任意：より親切にしたい場合）
+    if _is_symbol_only(keyword):
+        return {"ok": False, "error": "企業名に文字が含まれていません"}
+
+    try:
+        df = load_report_df_normalized()
+    except Exception as e:
+        return {"ok": False, "error": f"report_t_all.csv の読み込みに失敗しました: {e}"}
+
+    col_company = "企業名"
+    if col_company not in df.columns:
+        return {"ok": False, "error": f"report_t_all.csv に {col_company} 列がありません"}
+
+    norm_input = _normalize_company_name(keyword)
+
+    df = df.copy()
+    df["__norm_name"] = df[col_company].astype(str).apply(_normalize_company_name)
+
+    hit = df[df["__norm_name"] == norm_input]
+    if hit.empty:
+        # ←ここが「株式会社だけ」みたいな入力を弾く条件
+        return {"ok": False, "error": "データに存在しません（完全一致が必要です）"}
+
+    # 実在する会社名（表記ゆれがあってもCSV側の表記を返す）
+    matched = hit.iloc[0][col_company]
+    return {"ok": True, "company": str(matched).strip()}
