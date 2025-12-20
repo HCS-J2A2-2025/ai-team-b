@@ -437,3 +437,14 @@ body,
     transform: rotate(360deg);
   }
 }
+/* GridMenuModal が開いている間はサジェストを表示しない */
+body.grid-menu-open .suggest-panel {
+  display: none !important;
+}
+
+/* 入力も触れないようにする（クリック/タップ/フォーカスを防ぐ） */
+body.grid-menu-open .search-input-wrapper,
+body.grid-menu-open .search-input,
+body.grid-menu-open .search-button {
+  pointer-events: none;
+}

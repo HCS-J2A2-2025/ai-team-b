@@ -51,6 +51,18 @@ export default function GridMenuModal() {
       navigate("/");
     }
   };
+    useEffect(() => {
+    if (open) {
+      document.body.classList.add("grid-menu-open");
+      // 入力中のフォーカスを剥がして、キーボード入力でonChangeが走るのを止める
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+    } else {
+      document.body.classList.remove("grid-menu-open");
+    }
+    return () => document.body.classList.remove("grid-menu-open");
+  }, [open]);
   // マウント時に ログイン情報を取得
   useEffect(() => {
     const stored = localStorage.getItem("jobnaviUser");
@@ -118,7 +130,7 @@ export default function GridMenuModal() {
           display: flex;
           align-items: center;
           justify-content: center;
-          z-index: 1000;
+          z-index: 20000;
         }
 
         .grid-menu-dialog {
@@ -132,6 +144,7 @@ export default function GridMenuModal() {
           flex-direction: column;
           gap: 12px;
           overflow: visible; /* はみ出し防止で追加しておくと安心 */
+          z-index: 20001
         }
 
         .grid-menu-card {
