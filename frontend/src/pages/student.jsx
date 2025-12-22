@@ -126,7 +126,7 @@ useEffect(() => {
     return () => {
       if (fetchAbortRef.current) fetchAbortRef.current.abort();
     };
-  }, [searchedNo, useAi]);
+  }, [searchedNo]);
 
 
 
