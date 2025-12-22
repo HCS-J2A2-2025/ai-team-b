@@ -1,4 +1,4 @@
-import { useState, useEffect,useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import "../css/Result.css";
@@ -29,12 +29,54 @@ export default function Result() {
   const handleLogout = () => {
     console.log("ログアウトしました");
   };
+
   const didInitialFetchRef = useRef(false);
-// 会社名の比較用（空白差・大小差を吸収）
+
+  // =========================
+  // ✅ Search.jsx と同じサジェスト制御一式
+  // =========================
+  const suggestAbortRef = useRef(null);
+  const suppressSuggestRef = useRef(false); // 候補確定クリック直後の“復活”抑止
+  const suggestSeqRef = useRef(0); // 古いレスポンス破棄
+  const composingRef = useRef(false);
+  const pendingSelectRef = useRef(null);
+  const inputRef = useRef(null);
+
+  // 検索バー+サジェスト領域参照（外側クリックで閉じる）
+  const searchWrapperRef = useRef(null);
+
+  const applyPendingSelect = () => {
+    if (pendingSelectRef.current) {
+      handleSuggestionClick(pendingSelectRef.current);
+      pendingSelectRef.current = null;
+    }
+  };
+
+  // 外側クリックでサジェストを閉じる（Search と同じ）
+  useEffect(() => {
+    const onDocMouseDown = (e) => {
+      const root = searchWrapperRef.current;
+      if (!root) return;
+
+      if (!root.contains(e.target)) {
+        setSuggestions([]);
+        setIsSuggestLoading(false);
+
+        // 進行中の通信も止める
+        if (suggestAbortRef.current) suggestAbortRef.current.abort();
+        suggestSeqRef.current++;
+      }
+    };
+
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, []);
+
+  // 会社名の比較用（空白差・大小差を吸収）
   const normalizeCompanyName = (s) =>
     String(s ?? "")
       .trim()
-      .replace(/\s+/g, " ")   // 連続空白を1個に
+      .replace(/\s+/g, " ")
       .toLowerCase();
 
   const getReportId = (record, idx) =>
@@ -62,95 +104,89 @@ export default function Result() {
   const getFallbackMemoFromRecord = (record) =>
     typeof record?.memo === "string" && record.memo.trim() ? record.memo : "";
 
+  const fetchCompanyReport = async (companyName) => {
+    const name = (companyName || "").trim();
+    if (!name) return;
 
-const fetchCompanyReport = async (companyName) => {
-  const name = (companyName || "").trim();
-  if (!name) return;
+    setIsLoading(true);
+    setApiError(null);
+    setExpandedItem(null);
 
-  setIsLoading(true);
-  setApiError(null);
-  setExpandedItem(null);
+    setDetailsMap({});
+    setDetailLoadingMap({});
+    setDetailErrorMap({});
 
-  setDetailsMap({});
-  setDetailLoadingMap({});
-  setDetailErrorMap({});
-  let timerId = null;
-  timerId = setTimeout(() => setShowLoading(true), 200);
+    let timerId = null;
+    timerId = setTimeout(() => setShowLoading(true), 200);
 
-  try {
-  // ① POST：request_id だけ返る
-  const res = await fetch("http://localhost:8000/api/company/report", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name }),
-  });
+    try {
+      // ① POST：request_id だけ返る
+      const res = await fetch("http://localhost:8000/api/company/report", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
 
-  const postData = await res.json().catch(() => ({}));
+      const postData = await res.json().catch(() => ({}));
 
-  if (!res.ok || postData?.error) {
-    // 失敗しても既存表示は維持、エラーだけ出す
-    setApiError(postData?.error || `取得に失敗しました（HTTP ${res.status}）`);
-    return;
-  }
+      if (!res.ok || postData?.error) {
+        setApiError(
+          postData?.error || `取得に失敗しました（HTTP ${res.status}）`
+        );
+        return;
+      }
 
-  const requestId = postData?.request_id;
-  if (!requestId) {
-    setReport("");
-    setRecords([]);
-    setApiError("request_id が返ってきませんでした（サーバー実装を確認）");
-    return;
-  }
+      const requestId = postData?.request_id;
+      if (!requestId) {
+        setReport("");
+        setRecords([]);
+        setApiError("request_id が返ってきませんでした（サーバー実装を確認）");
+        return;
+      }
 
-  // ② POST：本体データを取得（GET → POST に変更）
-  const res2 = await fetch("http://localhost:8000/api/company/report/result", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ request_id: requestId }),
-  });
+      // ② POST：本体データを取得
+      const res2 = await fetch("http://localhost:8000/api/company/report/result", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ request_id: requestId }),
+      });
 
-  const data = await res2.json().catch(() => ({}));
+      const data = await res2.json().catch(() => ({}));
 
-  if (!res2.ok || data?.error) {
-    // 失敗しても既存表示は維持
-    setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
-    return;
-  } 
-  // 成功した時だけ画面に反映
-  setFixedCompanyName(name);
+      if (!res2.ok || data?.error) {
+        setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
+        return;
+      }
 
-const reportText =
-  data?.report ??
-  data?.result?.report ??
-  "";
+      setFixedCompanyName(name);
 
-setReport(reportText);
+      const reportText = data?.report ?? data?.result?.report ?? "";
+      setReport(reportText);
 
-// どの形でも拾う
-const list =
-  (Array.isArray(data?.records) && data.records) ||
-  (Array.isArray(data?.interviews) && data.interviews) ||
-  (Array.isArray(data?.result?.records) && data.result.records) ||
-  (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
-  [];
+      const list =
+        (Array.isArray(data?.records) && data.records) ||
+        (Array.isArray(data?.interviews) && data.interviews) ||
+        (Array.isArray(data?.result?.records) && data.result.records) ||
+        (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
+        [];
 
-setRecords(list.slice(-10));
-} catch (e) {
-  setApiError("API 接続エラー：サーバーに接続できませんでした");
-} finally {
-    clearTimeout(timerId);
-    setShowLoading(false);
-    setIsLoading(false);
-}
-};
-
+      setRecords(list.slice(-10));
+    } catch (e) {
+      setApiError("API 接続エラー：サーバーに接続できませんでした");
+    } finally {
+      clearTimeout(timerId);
+      setShowLoading(false);
+      setIsLoading(false);
+    }
+  };
 
   const fetchInterviewDetail = async (idx, record) => {
-  const reportId = getReportId(record, idx);
-  if (detailsMap[reportId]) return;
+    const reportId = getReportId(record, idx);
+    if (detailsMap[reportId]) return;
 
-  setDetailLoadingMap((p) => ({ ...p, [reportId]: true }));
-  setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
-  try {
+    setDetailLoadingMap((p) => ({ ...p, [reportId]: true }));
+    setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
+    try {
       const res = await fetch("http://localhost:8000/api/interview/detail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -182,125 +218,134 @@ setRecords(list.slice(-10));
     setExpandedItem(willOpen ? idx : null);
 
     if (!willOpen) return;
-
     const record = records[idx];
     if (!record) return;
 
-    //await fetchInterviewDetail(idx, record);
+    // await fetchInterviewDetail(idx, record);
   };
 
-  const suggestAbortRef = useRef(null);
+  // =========================
+  // ✅ Search.jsx と同じサジェスト取得関数
+  // =========================
+  const requestSuggest = async (keyword) => {
+    if (suppressSuggestRef.current) return;
 
-const handleSearchInputChange = (e) => {
-  const value = e.target.value;
-  setSearchQuery(value);
+    const key = (keyword ?? "").trim();
 
-  // 空なら候補を消すだけ
-  if (!value.trim()) {
-    // 進行中のsuggestがあれば止める
-    if (suggestAbortRef.current) {
-      suggestAbortRef.current.abort();
-      suggestAbortRef.current = null;
-    }
-    setSuggestions([]);
-    setIsSuggestLoading(false);
-    return;
-  }
-
-  // suggestは非同期で別呼び出し
-  fetchSuggest(value);
-};
-
-const fetchSuggest = async (value) => {
-  // 前のリクエストを止める（高速入力時の暴発対策）
-  if (suggestAbortRef.current) {
-    suggestAbortRef.current.abort();
-  }
-  const controller = new AbortController();
-  suggestAbortRef.current = controller;
-
-  setIsSuggestLoading(true);
-  try {
-    const res = await fetch("http://localhost:8000/company_suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ q: value, keyword: value }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
+    // 空なら候補消す＆通信止める
+    if (!key) {
+      if (suggestAbortRef.current) suggestAbortRef.current.abort();
       setSuggestions([]);
+      setIsSuggestLoading(false);
       return;
     }
 
-    const data = await res.json().catch(() => ({}));
-    const list = data?.candidates || data?.suggestions || [];
-    setSuggestions(Array.isArray(list) ? list : []);
-  } catch (err) {
-    // abort はエラー扱いにしない
-    if (err?.name !== "AbortError") setSuggestions([]);
-  } finally {
-    // 自分が最新のcontrollerの時だけ終了処理
-    if (suggestAbortRef.current === controller) {
-      setIsSuggestLoading(false);
-      suggestAbortRef.current = null;
+    // この入力に対するリクエスト番号
+    const seq = ++suggestSeqRef.current;
+
+    // 前回を中断
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    const controller = new AbortController();
+    suggestAbortRef.current = controller;
+
+    setIsSuggestLoading(true);
+
+    try {
+      const res = await fetch("http://localhost:8000/company_suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword }),
+        signal: controller.signal,
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      // 古い返りは捨てる
+      if (seq !== suggestSeqRef.current) return;
+      if (suppressSuggestRef.current) return;
+
+      if (!res.ok) {
+        setSuggestions([]);
+        return;
+      }
+
+      const list = data?.candidates || data?.suggestions || [];
+      setSuggestions(Array.isArray(list) ? list : []);
+    } catch (err) {
+      if (err?.name !== "AbortError") console.error("候補取得エラー:", err);
+      if (seq !== suggestSeqRef.current) return;
+      setSuggestions([]);
+    } finally {
+      if (seq === suggestSeqRef.current) setIsSuggestLoading(false);
     }
-  }
-};
+  };
 
-const handleSuggestionClick = (name) => {
-  // 候補クリックしたら進行中のsuggestを止める
-  if (suggestAbortRef.current) {
-    suggestAbortRef.current.abort();
-    suggestAbortRef.current = null;
-  }
-  setSearchQuery(name);
-  setSuggestions([]);
-  setIsSuggestLoading(false);
-};
-// 比較専用：表示/送信には使わない
-const normalizeForCompare = (s) =>
-  String(s ?? "")
-    .replace(/\u3000/g, " ")   // 全角スペース→半角
-    .trim()
-    .replace(/\s+/g, " ")      // 連続スペースを1つに
-    .toLowerCase();            // 大小差を吸収（比較だけ）
+  const handleSearchInputChange = (e) => {
+    const value = e.target.value;
+    setSearchQuery(value);
 
-const handleSearchSubmit = async (e) => {
-  e.preventDefault();
-  if (isLoading) return;
+    // 入力が変わった兆し → サジェスト更新
+    requestSuggest(value);
+  };
 
-  // 送信用は “生の入力” を維持（AI要約の中身を変えない）
-  const raw = searchQuery;
+  // クリックなど「入力する兆し」でサジェストを再表示（Search と同じ）
+  const handleInputClick = () => {
+    requestSuggest(searchQuery);
+  };
 
-  // 判定だけ正規化
-  const nextKey = normalizeForCompare(raw);
-  const prevKey = normalizeForCompare(fixedCompanyName);
+  const handleSuggestionClick = (name) => {
+    suppressSuggestRef.current = true;
 
-  if (nextKey && prevKey && nextKey === prevKey) {
+    // 進行中のサジェスト通信を止める
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    suggestSeqRef.current++; // 遅れて返ったやつは捨てる
+
+    setSearchQuery(name);
     setSuggestions([]);
-    setApiError("同一条件のため、AI再生成は行っていません");
-    return;
-  }
+    setApiError(null);
+    setIsSuggestLoading(false);
 
-  setApiError(null);
-  setSuggestions([]);
-  await fetchCompanyReport(raw); // ←ここは raw のまま
-};
+    // 次にユーザーが入力したら再開
+    setTimeout(() => {
+      suppressSuggestRef.current = false;
+    }, 0);
+  };
 
+  // 比較専用：表示/送信には使わない
+  const normalizeForCompare = (s) =>
+    String(s ?? "")
+      .replace(/\u3000/g, " ")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+
+  const handleSearchSubmit = async (e) => {
+    e.preventDefault();
+    if (isLoading) return;
+
+    const raw = searchQuery;
+    const nextKey = normalizeForCompare(raw);
+    const prevKey = normalizeForCompare(fixedCompanyName);
+
+    if (nextKey && prevKey && nextKey === prevKey) {
+      setSuggestions([]);
+      setApiError("同一条件のため、AI再生成は行っていません");
+      return;
+    }
+
+    setApiError(null);
+    setSuggestions([]);
+    await fetchCompanyReport(raw);
+  };
 
   useEffect(() => {
-    if (didInitialFetchRef.current) return; // 2回目は無視
+    if (didInitialFetchRef.current) return;
     didInitialFetchRef.current = true;
-    if (initialCompanyName !== "会社名が入力されていません") {
+    if (initialCompanyName && initialCompanyName !== "会社名が入力されていません") {
       fetchCompanyReport(initialCompanyName);
     }
     // eslint-disable-next-line
   }, []);
-
-  // We no longer compute result‑specific class names for the search elements.
-  // The search bar and suggestion list now reuse the same classes from Search.css
-  // to ensure a consistent look across pages.
 
   return (
     <div className="result-container">
@@ -317,12 +362,10 @@ const handleSearchSubmit = async (e) => {
         )}
 
         <section className="result-search-area">
-          {/* Use the same structure and classes as the Search page */}
           <form className="search-area" onSubmit={handleSearchSubmit}>
-              <div className="search-row">
-
-              {/* Input field and suggestions */}
-              <div className="search-wrapper">
+            <div className="search-row">
+              {/* ✅ Search と同じ：search-wrapper を ref で囲う */}
+              <div className="search-wrapper" ref={searchWrapperRef}>
                 <div
                   className={`search-input-wrapper ${
                     suggestions.length > 0 ? "has-suggest" : ""
@@ -330,23 +373,50 @@ const handleSearchSubmit = async (e) => {
                 >
                   <span className="search-icon">🔍</span>
                   <input
+                    ref={inputRef}
                     type="text"
                     className="search-input"
                     placeholder="会社名を記入　例）ダイアモンドヘッド"
                     value={searchQuery}
                     onChange={handleSearchInputChange}
+                    onClick={handleInputClick}
+                    onCompositionStart={() => {
+                      composingRef.current = true;
+                    }}
+                    onCompositionEnd={() => {
+                      composingRef.current = false;
+                      applyPendingSelect();
+                    }}
+                    onBlur={() => {
+                      composingRef.current = false;
+                      applyPendingSelect();
+                    }}
                   />
                 </div>
+
                 {suggestions.length > 0 && (
                   <div className="suggest-panel">
                     {isSuggestLoading && (
                       <div className="suggest-loading">検索中...</div>
                     )}
+
                     {suggestions.map((name) => (
                       <div
                         key={name}
                         className="suggest-row"
-                        onClick={() => handleSuggestionClick(name)}
+                        onMouseDown={(e) => {
+                          // ✅ Search と同じ：外側クリック判定/blurより先に確定させる
+                          e.preventDefault();
+                          e.stopPropagation();
+
+                          if (composingRef.current) {
+                            pendingSelectRef.current = name;
+                            requestAnimationFrame(() => inputRef.current?.blur());
+                            return;
+                          }
+
+                          handleSuggestionClick(name);
+                        }}
                       >
                         <span className="suggest-icon">⏺</span>
                         <span className="suggest-text">{name}</span>
@@ -355,12 +425,13 @@ const handleSearchSubmit = async (e) => {
                   </div>
                 )}
               </div>
-              {/* Submit button */}
+
               <button type="submit" className="search-button" disabled={isLoading}>
                 {isLoading ? "検索中..." : "検　索"}
               </button>
             </div>
           </form>
+
           {apiError && <div className="result-api-error">{apiError}</div>}
         </section>
 
@@ -458,7 +529,8 @@ const handleSearchSubmit = async (e) => {
 
                         <div className="result-detail-section-title">質問内容</div>
 
-                        {Array.isArray(displayQuestions) && displayQuestions.length > 0 ? (
+                        {Array.isArray(displayQuestions) &&
+                        displayQuestions.length > 0 ? (
                           displayQuestions.map((q, i) => (
                             <div key={i} className="result-q-line">
                               {`Q${i + 1}. ${q}`}

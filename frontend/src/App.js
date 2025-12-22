@@ -12,7 +12,7 @@ const KEY = "mem_path";
 export default function App() {
   const location = useLocation();
 
-  // ✅ 今いる画面を保存（F5しても戻れる）
+  // 今いる画面を保存（F5しても戻れる）
   useEffect(() => {
     sessionStorage.setItem(KEY, location.pathname + location.search);
   }, [location.pathname, location.search]);
