@@ -30,11 +30,15 @@ function StudentPage() {
   const navigate = useNavigate();
   // 追加（stateの近く）
   const lastSearchedNoRef = useRef(null);
+  const [useAi, setUseAi] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem("jobnaviUser");
     navigate("/loginpage");
   };
+  //一瞬映る「該当する学生データがありません」を表示させない
+  const [hasSearched, setHasSearched] = useState(false);
+
 useEffect(() => {
   const stored = localStorage.getItem("jobnaviUser");
   if (!stored) {
@@ -93,7 +97,9 @@ useEffect(() => {
         const res = await fetch("http://127.0.0.1:8000/api/student/analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ student_id: searchedNo, use_ai: false }),
+          body: JSON.stringify({ 
+            student_id: searchedNo,
+            use_ai: useAi }),
           signal: controller.signal,
         });
 
@@ -111,6 +117,7 @@ useEffect(() => {
         }
       } finally {
         setIsFetching(false);
+        setUseAi(false);
       }
     };
     fetchOne();
@@ -119,7 +126,7 @@ useEffect(() => {
     return () => {
       if (fetchAbortRef.current) fetchAbortRef.current.abort();
     };
-  }, [searchedNo]);
+  }, [searchedNo, useAi]);
 
 
 
@@ -183,21 +190,22 @@ const handleInputChange = async (e) => {
     const v = inputNo.trim();
     if (!v) return;
 
-    // ★ 直前と同じ学籍番号ならブロック
+    // 直前と同じ学籍番号ならブロック
     if (lastSearchedNoRef.current === v) {
       setApiError("直前と同じ学籍番号のため、再検索は行われません");
       return;
     }
-
+    //検索ボタン押した瞬間から“検索中”にする
+    setIsFetching(true); 
+    setHasSearched(true);
     setApiError(null);
     setSuggestions([]);
-
-    setIsFetching(true);
+    setUseAi(true);
     setStudentData(null);
 
     setSearchedNo(v);
 
-    // ★ 今回の検索を「直前」として保存
+    // 今回の検索を「直前」として保存
     lastSearchedNoRef.current = v;
   };
 
@@ -270,7 +278,7 @@ const handleInputChange = async (e) => {
 
 
           {/* 検索確定後、取得できなかった */}
-          {searchedNo && !isFetching && !studentData && !apiError && (
+          {hasSearched && searchedNo && !isFetching && !studentData && !apiError && (
             <p className="student-notfound">該当する学生データがありません</p>
           )}
 
