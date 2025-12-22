@@ -59,7 +59,7 @@ export default function Loginpage() {
     };
     const handleToggle = () => setOpen((prev) => !prev);
     const handleClose = () => setOpen(false);
-    // ★ Inteligens クリック時：ログイン状態で遷移先分岐
+    //  Inteligens クリック時：ログイン状態で遷移先分岐
     const handleClickInteligens = () => {
         const stored = localStorage.getItem("jobnaviUser");
         setOpen(false);

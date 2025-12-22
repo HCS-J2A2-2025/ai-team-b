@@ -14,7 +14,7 @@ CSV_PATH = BASE_DIR / "data" / "report_t_all.csv"
 AI_URL = "http://localhost:11434/api/generate"
 MODEL = "qwen2.5:14b-instruct"
 
-# ★ student_id 指定時のみ有効になる
+# student_id 指定時のみ有効になる
 USE_AI = False
 
 

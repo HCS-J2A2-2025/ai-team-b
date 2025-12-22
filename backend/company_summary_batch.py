@@ -18,7 +18,7 @@ import hmac
 import hashlib
 import base64
 
-# ★ これを .env / 環境変数で必ず上書きする（dev用デフォルトは仮）
+# これを .env / 環境変数で必ず上書きする（dev用デフォルトは仮）
 PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
 
 # =========================

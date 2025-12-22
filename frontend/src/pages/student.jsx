@@ -20,6 +20,7 @@ function StudentPage() {
   const [showSubmitting, setShowSubmitting] = useState(false);
   const loadingTimerRef = useRef(null);
   const fetchAbortRef = useRef(null);
+
   // API通信中表示（任意）
   const [isFetching, setIsFetching] = useState(false);
 
@@ -28,55 +29,59 @@ function StudentPage() {
 
   const inputRef = useRef(null);
   const navigate = useNavigate();
-  // 追加（stateの近く）
+
   const lastSearchedNoRef = useRef(null);
-  const [useAi, setUseAi] = useState(false);
+  const useAiRef = useRef(false);
+  const [lastSearchHadData, setLastSearchHadData] = useState(false);
+  const [lastSearchNotFound, setLastSearchNotFound] = useState(false);
+
+  // 画面に表示しているデータの学籍番号（=最後に成功した番号）
+  const [displayNo, setDisplayNo] = useState("");
+  // 検索を1回でもしたかのフラグ
+  const [hasSearched, setHasSearched] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem("jobnaviUser");
     navigate("/loginpage");
   };
-  //一瞬映る「該当する学生データがありません」を表示させない
-  const [hasSearched, setHasSearched] = useState(false);
 
-useEffect(() => {
-  const stored = localStorage.getItem("jobnaviUser");
-  if (!stored) {
-    navigate("/loginpage");
-    return;
-  }
-  try {
-    const user = JSON.parse(stored);
-    const role = (user.role || "").toLowerCase();
-    if (role !== "teacher" && role !== "admin") {
-      navigate("/loginpage"); // または "/search" に戻すでもOK
+  useEffect(() => {
+    const stored = localStorage.getItem("jobnaviUser");
+    if (!stored) {
+      navigate("/loginpage");
       return;
     }
-    setRole(role);
-  } catch {
-    navigate("/loginpage");
-  }
-}, [navigate]);
+    try {
+      const user = JSON.parse(stored);
+      const role = (user.role || "").toLowerCase();
+      if (role !== "teacher" && role !== "admin") {
+        navigate("/loginpage"); // または "/search" に戻すでもOK
+        return;
+      }
+      setRole(role);
+    } catch {
+      navigate("/loginpage");
+    }
+  }, [navigate]);
 
   // Search.jsx と同じ「遅延表示ローディング」
-useEffect(() => {
-  // isFetching が true になったら「遅延で」表示
-  if (isFetching) {
-    if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
-    loadingTimerRef.current = setTimeout(() => setShowSubmitting(true), 200);
-    return;
-  }
+  useEffect(() => {
+    // isFetching が true になったら「遅延で」表示
+    if (isFetching) {
+      if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = setTimeout(() => setShowSubmitting(true), 200);
+      return;
+    }
 
-  // isFetching が false になったら必ず非表示
-  if (loadingTimerRef.current) {
-    clearTimeout(loadingTimerRef.current);
-    loadingTimerRef.current = null;
-  }
-  setShowSubmitting(false);
-}, [isFetching]);
+    // isFetching が false になったら必ず非表示
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current);
+      loadingTimerRef.current = null;
+    }
+    setShowSubmitting(false);
+  }, [isFetching]);
 
-
-  // ロール確認（teacher/adminのみ）※今のままだと role を使ってないので警告が気になるなら setRole を消してもOK
+  // 学生分析
   useEffect(() => {
     const fetchOne = async () => {
       if (!searchedNo) {
@@ -91,15 +96,17 @@ useEffect(() => {
       const controller = new AbortController();
       fetchAbortRef.current = controller;
 
+      setApiError(null);
       setIsFetching(true);
 
       try {
         const res = await fetch("http://127.0.0.1:8000/api/student/analysis", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ 
+          body: JSON.stringify({
             student_id: searchedNo,
-            use_ai: useAi }),
+            use_ai: useAiRef.current,
+          }),
           signal: controller.signal,
         });
 
@@ -109,17 +116,34 @@ useEffect(() => {
         const one =
           json?.data && Object.keys(json.data).length > 0 ? json.data : null;
 
+        if (!one) {
+          // 該当なし：前回データは維持。エラーだけ出す
+          setApiError("該当する学生データがありません");
+          setLastSearchHadData(false);
+          setLastSearchNotFound(true);
+          return;
+        }
+
+        // 成功：ここで初めて studentData を更新
+        setApiError(null);
         setStudentData(one);
+        setDisplayNo(searchedNo);
+        setLastSearchHadData(true);
+        setLastSearchNotFound(false);
       } catch (err) {
         if (err?.name !== "AbortError") {
           console.error("学生データ取得エラー:", err);
-          setStudentData(null);
+          // 失敗時も「前回の結果を保持」したいなら setStudentData(null) はしない
+          setApiError("学生データ取得に失敗しました");
+          setLastSearchHadData(false);
+          setLastSearchNotFound(false);
         }
       } finally {
         setIsFetching(false);
-        setUseAi(false);
+        useAiRef.current = false;
       }
     };
+
     fetchOne();
 
     // searchedNo が変わる/アンマウントでキャンセル
@@ -128,108 +152,166 @@ useEffect(() => {
     };
   }, [searchedNo]);
 
-
-
+  // ===== サジェスト制御（ここが修正ポイント） =====
   const suggestAbortRef = useRef(null);
+  const suggestAreaRef = useRef(null);
+  const latestSuggestKeyRef = useRef("");
+  const suppressSuggestRef = useRef(false);
 
-  // 入力変更：サジェストを出すだけ（検索確定はしない）
-const handleInputChange = async (e) => {
-  const value = e.target.value;
-  setInputNo(value);
-  setApiError(null);
-
-  if (!value.trim()) {
-    setSuggestions([]);
-    return;
-  }
-
-  // 前回リクエストキャンセル
-  if (suggestAbortRef.current) {
-    suggestAbortRef.current.abort();
-  }
-  const controller = new AbortController();
-  suggestAbortRef.current = controller;
-
-  setIsSuggestLoading(true);
-  try {
-    const res = await fetch("http://127.0.0.1:8000/api/student/suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ keyword: value }),
-      signal: controller.signal,
-    });
-
-    if (!res.ok) {
+  // サジェスト取得（古いレスポンスで復活しないようガード）
+  const fetchSuggest = async (keyword) => {
+    const key = (keyword || "").trim();
+    if (!key) {
       setSuggestions([]);
       return;
     }
 
-    const json = await res.json();
-    setSuggestions(json.candidates || []);
-  } catch (err) {
-    if (err?.name !== "AbortError") {
-      console.error("学籍番号サジェスト取得エラー:", err);
-    }
-    setSuggestions([]);
-  } finally {
-    setIsSuggestLoading(false);
-  }
-};
+    // 選択直後など「出してはいけない」タイミング
+    if (suppressSuggestRef.current) return;
 
+    // 前回リクエストキャンセル
+    if (suggestAbortRef.current) {
+      suggestAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    suggestAbortRef.current = controller;
+
+    latestSuggestKeyRef.current = key;
+    setIsSuggestLoading(true);
+
+    try {
+      const res = await fetch("http://127.0.0.1:8000/api/student/suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: key }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        setSuggestions([]);
+        return;
+      }
+
+      const json = await res.json();
+
+      // 入力値が変わっていたら（古いレスポンス）反映しない
+      if (latestSuggestKeyRef.current !== key) return;
+      // 選択直後などに抑止が立っていたら反映しない
+      if (suppressSuggestRef.current) return;
+
+      setSuggestions(json.candidates || []);
+    } catch (err) {
+      if (err?.name !== "AbortError") {
+        console.error("学籍番号サジェスト取得エラー:", err);
+      }
+      setSuggestions([]);
+    } finally {
+      setIsSuggestLoading(false);
+    }
+  };
+
+  // 入力変更：サジェストを出すだけ（検索確定はしない）
+  const handleInputChange = async (e) => {
+    const value = e.target.value;
+    setInputNo(value);
+    setApiError(null);
+
+    // 入力が始まったら抑止解除（＝またサジェストを出せる）
+    suppressSuggestRef.current = false;
+
+    await fetchSuggest(value);
+  };
+
+  // 入力欄クリック/フォーカスで、消えていても再度サジェストを出す
+  const handleInputFocusOrClick = () => {
+    suppressSuggestRef.current = false;
+    fetchSuggest(inputNo);
+  };
 
   // サジェストクリック：入力欄に入れるだけ（検索は確定しない）
   const handleSuggestionClick = (sid) => {
+    // クリック後に通信の結果で「復活」しないよう抑止
+    suppressSuggestRef.current = true;
+
+    // 通信中ならキャンセル
+    if (suggestAbortRef.current) suggestAbortRef.current.abort();
+    latestSuggestKeyRef.current = "";
+
     setInputNo(sid);
     setSuggestions([]);
     setApiError(null);
     requestAnimationFrame(() => inputRef.current?.focus());
   };
 
+  // サジェスト以外をクリックしたら閉じる（外側クリック）
+  useEffect(() => {
+    const onDown = (e) => {
+      if (!suggestAreaRef.current) return;
+      if (suggestAreaRef.current.contains(e.target)) return;
+      setSuggestions([]);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, []);
+
   const handleSubmit = (e) => {
     e.preventDefault();
     const v = inputNo.trim();
     if (!v) return;
 
+    setHasSearched(true);
+
+    const isSameAsLast = lastSearchedNoRef.current === v;
+
+    // 直前が「存在しない」で、同じ番号を再検索 → 通信もAIも回さない。エラーだけ再表示
+    if (isSameAsLast && lastSearchNotFound) {
+      setApiError("該当する学生データがありません");
+      return;
+    }
+
     // 直前と同じ学籍番号ならブロック
-    if (lastSearchedNoRef.current === v) {
+    if (isSameAsLast && lastSearchHadData) {
       setApiError("直前と同じ学籍番号のため、再検索は行われません");
       return;
     }
-    //検索ボタン押した瞬間から“検索中”にする
-    setIsFetching(true); 
-    setHasSearched(true);
+
+    // 検索ボタン押した瞬間から“検索中”にする
     setApiError(null);
+    setIsFetching(true);
     setSuggestions([]);
-    setUseAi(true);
-    setStudentData(null);
+
+    // 前回結果の判定をいったん未確定にする
+    setLastSearchNotFound(false);
+    setLastSearchHadData(false);
+
+    // ここは要件次第。毎回AIを回すなら true 固定でOK
+    useAiRef.current = true;
 
     setSearchedNo(v);
-
-    // 今回の検索を「直前」として保存
     lastSearchedNoRef.current = v;
   };
-
 
   return (
     <div className="app-root">
       <AppHeader title="学生受験分析レポート" onLogout={handleLogout} />
 
       <main className="app-main">
-
-      {showSubmitting && (
-        <div className="loading-backdrop">
-          <div className="loading-box">
-            <div className="loading-text">学生分析レポートを生成しています…</div>
-            <div className="loading-spinner" />
+        {showSubmitting && (
+          <div className="loading-backdrop">
+            <div className="loading-box">
+              <div className="loading-text">
+                学生分析レポートを生成しています…
+              </div>
+              <div className="loading-spinner" />
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
         <section>
           <h1 className="main-title">学生受験分析レポート</h1>
 
           <form className="search-area" onSubmit={handleSubmit}>
-            <div className="search-wrapper">
+            <div className="search-wrapper" ref={suggestAreaRef}>
               <div
                 className={`search-input-wrapper ${
                   suggestions.length > 0 ? "has-suggest" : ""
@@ -243,6 +325,7 @@ const handleInputChange = async (e) => {
                   placeholder="学籍番号を記入　例）S20240001"
                   value={inputNo}
                   onChange={handleInputChange}
+                  onClick={handleInputFocusOrClick}
                 />
               </div>
 
@@ -270,17 +353,18 @@ const handleInputChange = async (e) => {
             </button>
           </form>
 
-          {apiError && <div className="student-error">{apiError}</div>}
+          {apiError && hasSearched && (
+            <div className="student-error">
+              {apiError}
+              {searchedNo && (
+                <div className="student-error-sub">入力：{searchedNo}</div>
+              )}
+            </div>
+          )}
         </section>
 
         <div className="student-page-root">
-          {searchedNo && <h3>📌 学籍番号：{searchedNo}</h3>}
-
-
-          {/* 検索確定後、取得できなかった */}
-          {hasSearched && searchedNo && !isFetching && !studentData && !apiError && (
-            <p className="student-notfound">該当する学生データがありません</p>
-          )}
+          {studentData && <h3>📌 表示中の学籍番号：{displayNo}</h3>}
 
           {studentData && (
             <>

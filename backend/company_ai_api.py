@@ -33,7 +33,7 @@ from company_summary_batch import (
     generate_student_ai_summary,
 )
 
-# ★ここが超重要：FastAPI側のスイッチを company_summary_batch 側へ反映
+# ここが超重要：FastAPI側のスイッチを company_summary_batch 側へ反映
 # （あなたが前に作った完成版 company_summary_batch.py が ENABLE_LEFT_AI / ENABLE_RIGHT_AI を持っている前提）
 csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
 csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
@@ -176,7 +176,7 @@ def _create_report(name: str, student_no: str | None = None):
     if not company_name:
         return None, {"error": "company_name が空です"}
 
-    # ★都度反映（起動後に USE_* を切り替えたくなっても安全）
+    # 都度反映（起動後に USE_* を切り替えたくなっても安全）
     csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
     csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 
