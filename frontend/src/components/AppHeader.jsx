@@ -13,6 +13,8 @@
         <style>{`
         .app-header {
             height: 64px;
+            min-height: 64px;
+            max-height: 64px;
             padding: 0;
             padding-right: 16px;
             display: flex;
@@ -40,6 +42,7 @@
         .app-header-title {
             font-size: 22px;
             font-weight: 700;
+            line-height: 1; 
         }
 
         .app-header-right {
@@ -49,8 +52,8 @@
         }
         /* ===== ログアウトボタン本体 ===== */
         .logout-btn {
-            width: 52px;
-            height: 52px;
+            width: 48px;
+            height: 48px;
             padding: 0;
             border: none;
             background: transparent;
