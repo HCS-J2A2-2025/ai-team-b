@@ -5,8 +5,7 @@ import Loginpage from "./pages/Loginpage.jsx";
 import Search from "./pages/Search.jsx";
 import Result from "./pages/Result.jsx";
 import StudentPage from "./pages/student";
-import TetrisPage from "./pages/TetrisPage.jsx";
-import YachtGame from "./pages/YachtGame.jsx";
+
 
 const KEY = "mem_path";
 
@@ -28,9 +27,6 @@ export default function App() {
       <Route path="/student" element={<StudentPage />} />
       <Route path="/result" element={<Result />} />
 
-      {/* ゲーム系 */}
-      <Route path="/tetris" element={<TetrisPage />} />
-      <Route path="/game/yacht" element={<YachtGame />} />
 
       {/* 想定外ルート → ログイン */}
       <Route path="*" element={<Loginpage />} />
