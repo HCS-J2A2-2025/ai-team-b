@@ -8,12 +8,10 @@ import "../css/Search.css";
 export default function Result() {
   const location = useLocation();
 
-  const initialCompanyName =
-    location.state?.companyName || "会社名が入力されていません";
-
+  const initialCompanyName = (location.state?.companyName ?? "").trim();
+  const [searchQuery, setSearchQuery] = useState(initialCompanyName);
   const [fixedCompanyName, setFixedCompanyName] = useState(initialCompanyName);
   const [expandedItem, setExpandedItem] = useState(null);
-  const [searchQuery, setSearchQuery] = useState(initialCompanyName);
 
   const [report, setReport] = useState("");
   const [records, setRecords] = useState([]);
@@ -191,42 +189,75 @@ setRecords(list.slice(-10));
     //await fetchInterviewDetail(idx, record);
   };
 
-  const handleSearchInputChange = async (e) => {
-    const value = e.target.value;
-    setSearchQuery(value);
+  const suggestAbortRef = useRef(null);
 
-    if (!value.trim()) {
+const handleSearchInputChange = (e) => {
+  const value = e.target.value;
+  setSearchQuery(value);
+
+  // 空なら候補を消すだけ
+  if (!value.trim()) {
+    // 進行中のsuggestがあれば止める
+    if (suggestAbortRef.current) {
+      suggestAbortRef.current.abort();
+      suggestAbortRef.current = null;
+    }
+    setSuggestions([]);
+    setIsSuggestLoading(false);
+    return;
+  }
+
+  // suggestは非同期で別呼び出し
+  fetchSuggest(value);
+};
+
+const fetchSuggest = async (value) => {
+  // 前のリクエストを止める（高速入力時の暴発対策）
+  if (suggestAbortRef.current) {
+    suggestAbortRef.current.abort();
+  }
+  const controller = new AbortController();
+  suggestAbortRef.current = controller;
+
+  setIsSuggestLoading(true);
+  try {
+    const res = await fetch("http://localhost:8000/company_suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ q: value, keyword: value }),
+      signal: controller.signal,
+    });
+
+    if (!res.ok) {
       setSuggestions([]);
       return;
     }
 
-    setIsSuggestLoading(true);
-    try {
-      const res = await fetch("http://localhost:8000/company_suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ q: value, keyword: value }),
-      });
-
-      if (!res.ok) {
-        setSuggestions([]);
-        return;
-      }
-
-      const data = await res.json();
-      const list = data?.candidates || data?.suggestions || [];
-      setSuggestions(Array.isArray(list) ? list : []);
-    } catch {
-      setSuggestions([]);
-    } finally {
+    const data = await res.json().catch(() => ({}));
+    const list = data?.candidates || data?.suggestions || [];
+    setSuggestions(Array.isArray(list) ? list : []);
+  } catch (err) {
+    // abort はエラー扱いにしない
+    if (err?.name !== "AbortError") setSuggestions([]);
+  } finally {
+    // 自分が最新のcontrollerの時だけ終了処理
+    if (suggestAbortRef.current === controller) {
       setIsSuggestLoading(false);
+      suggestAbortRef.current = null;
     }
-  };
+  }
+};
 
-  const handleSuggestionClick = (name) => {
-    setSearchQuery(name);
-    setSuggestions([]);
-  };
+const handleSuggestionClick = (name) => {
+  // 候補クリックしたら進行中のsuggestを止める
+  if (suggestAbortRef.current) {
+    suggestAbortRef.current.abort();
+    suggestAbortRef.current = null;
+  }
+  setSearchQuery(name);
+  setSuggestions([]);
+  setIsSuggestLoading(false);
+};
 // 比較専用：表示/送信には使わない
 const normalizeForCompare = (s) =>
   String(s ?? "")
@@ -338,7 +369,7 @@ const handleSearchSubmit = async (e) => {
             <div className="result-ai-report-header">
               <span className="result-ai-icon">✨</span>
               <h3 className="result-ai-report-title">
-                AI要約レポート（{(fixedCompanyName || "").trim()}）
+                AI要約レポート（{fixedCompanyName ? fixedCompanyName.trim() : "未選択"}）
               </h3>
             </div>
 
