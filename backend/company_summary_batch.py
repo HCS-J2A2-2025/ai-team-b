@@ -271,6 +271,7 @@ def extract_questions(text: str, max_q: int = 6) -> list[str]:
 # 回次ラベル（2回目が最終になるケース対応）
 # ============================================================
 def calc_round_label(round_index: int, total_rounds: int) -> str:
+    # 安全に int 化
     try:
         round_index = int(round_index)
     except Exception:
@@ -281,14 +282,21 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
     except Exception:
         total_rounds = round_index if round_index > 0 else 1
 
+    # 下限補正
     if round_index <= 0:
         round_index = 1
     if total_rounds <= 0:
         total_rounds = 1
 
+    # 上限補正（round_index が total を超えないように）
     if round_index > total_rounds:
         round_index = total_rounds
 
+    # ★追加：1回しかログがない学生は一次面接扱い（最終面接にしない）
+    if total_rounds == 1:
+        return "一次面接"
+
+    # 4回以上は 1,2,3,最終 の固定割当
     if total_rounds >= 4:
         if round_index == 1:
             return "一次面接"
@@ -298,9 +306,11 @@ def calc_round_label(round_index: int, total_rounds: int) -> str:
             return "三次面接"
         return "最終面接"
 
+    # 2回 or 3回のときは「最後＝最終」
     if round_index == total_rounds:
         return "最終面接"
 
+    # それ以外は順番どおり
     if round_index == 1:
         return "一次面接"
     if round_index == 2:
@@ -597,7 +607,6 @@ def generate_detailed_report(row: pd.Series) -> str:
 """.strip()
 
     out = ask_ai(user, system_prompt=system)
-    # 左側はエラー文字列を出したくないならここで "" にしてもOK
     if out.startswith("[ERROR]"):
         return out
     return out.strip()
@@ -759,7 +768,7 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
 
     col_company = "企業名"
     col_event = "イベント種別"
-    col_result = "結果種別"
+    col_result = "結果種別"      # 通過判定に使う
     col_start = "開始日時"
     col_format = "形式"
     col_student = "学籍番号"
@@ -774,16 +783,15 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     if not target_name:
         return []
 
+    # 企業一致（完全一致→部分一致）
     company_series = df[col_company].astype(str).str.strip()
-
-    # 完全一致→ダメなら部分一致
     df_company = df[company_series == target_name].copy()
     if df_company.empty:
         df_company = df[company_series.str.contains(target_name, na=False, regex=False)].copy()
         if df_company.empty:
             return []
 
-    # 学籍番号指定（個人モード）
+    # 個人モード（学生指定）※この場合はその学生だけの回次表示になる
     if student_no is not None and col_student in df_company.columns:
         df_company = df_company[df_company[col_student].astype(str).str.strip() == str(student_no).strip()].copy()
         if df_company.empty:
@@ -800,111 +808,161 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     if df_iv.empty:
         return []
 
-    # 学籍番号キー
+    # 学籍番号キー（無い/空は UNKNOWN）
     if col_student in df_iv.columns:
         df_iv["_student_key"] = df_iv[col_student].astype(str).fillna("").str.strip()
         df_iv.loc[df_iv["_student_key"] == "", "_student_key"] = "UNKNOWN"
     else:
         df_iv["_student_key"] = "UNKNOWN"
 
-    # 回次（学籍番号ごとに古→新で 1,2,3...）
+    # =========================================================
+    # ★コホートを作る：最新10人（＝右側の「10人」）
+    # =========================================================
+    if student_no is None:
+        latest_dt_per_student = (
+            df_iv.groupby("_student_key")["start_dt_obj"]
+            .max()
+            .sort_values(ascending=False)
+        )
+        cohort_keys = latest_dt_per_student.head(DISPLAY_RECORD_LIMIT).index.tolist()
+        df_iv = df_iv[df_iv["_student_key"].isin(cohort_keys)].copy()
+
+    if df_iv.empty:
+        return []
+
+    # =========================================================
+    # 回次：学生ごとに古→新で 1,2,3...
+    # total_rounds：学生ごとの総回数
+    # =========================================================
     df_iv = df_iv.sort_values(["_student_key", "start_dt_obj"])
     df_iv["round_index"] = df_iv.groupby("_student_key").cumcount() + 1
     total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
 
-    # 最新10人
-    latest_dt_per_student = df_iv.groupby("_student_key")["start_dt_obj"].max().sort_values(ascending=False)
-    latest_student_keys = latest_dt_per_student.head(DISPLAY_RECORD_LIMIT).index.tolist()
-    df_top = df_iv[df_iv["_student_key"].isin(latest_student_keys)].copy()
-    if df_top.empty:
-        return []
-
     def _round_label(row):
         key = str(row.get("_student_key", "UNKNOWN"))
-        total = int(total_rounds_map.get(key, int(row.get("round_index", 1))))
         idx = int(row.get("round_index", 1))
+        total = int(total_rounds_map.get(key, idx))
         return calc_round_label(idx, total)
 
-    df_top["round_label"] = df_top.apply(_round_label, axis=1)
+    df_iv["round_label"] = df_iv.apply(_round_label, axis=1)
 
-    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
+    # ★最後の回（真の最終）を明示（これが「最終10件」を止める）
+    df_iv["total_rounds"] = (
+        df_iv["_student_key"].map(total_rounds_map)
+        .fillna(df_iv["round_index"])
+        .astype(int)
+    )
+    df_iv["_is_final"] = (df_iv["round_index"] == df_iv["total_rounds"])
 
-    # 評価文除外など（AI後にも軽く通す）
-    EVAL_PHRASES = [
-        "評価", "懸念", "不足", "見られ", "必要", "できた", "できて", "できる",
-        "感じた", "思った", "だった", "であった", "が高い", "が低い", "が強い",
-        "が弱い", "不足して", "欠け", "ミスマッチ", "払拭", "内定", "合格", "不合格"
-    ]
-    QUESTION_CUES = [
-        "何", "なぜ", "どう", "どの", "いつ", "どれ", "理由", "きっかけ", "具体的",
-        "説明", "教えて", "伺", "ありますか", "できますか", "ですか"
-    ]
+    # =========================================================
+    # ★通過判定（ここが画像のカウントの肝）
+    # =========================================================
+    PASS_WORDS = ["継続", "合格", "通過", "内々定", "次へ", "内定"]
+    FAIL_WORDS = ["落選", "不合格", "見送り", "辞退", "不採用", "終了", "否"]
 
-    def _is_good_question(q: str) -> bool:
-        if not isinstance(q, str):
-            return False
-        s = re.sub(r"\s+", " ", q).strip()
+    def is_pass(result_str: str) -> bool:
+        s = str(result_str or "").strip()
         if not s:
             return False
-        if any(w in s for w in QUESTION_NG_WORDS):
+        if any(w in s for w in FAIL_WORDS):
             return False
-        if len(s) < 8 or len(s) > 80:
-            return False
+        if any(w in s for w in PASS_WORDS):
+            return True
+        return False
 
-        has_qmark = ("？" in s) or ("?" in s)
-        has_cue = any(c in s for c in QUESTION_CUES)
-        evalish = any(p in s for p in EVAL_PHRASES)
-        if evalish and not (has_qmark or has_cue):
-            return False
+    # =========================================================
+    # ★「一次→二次→…」の通過ゲート
+    # eligible=True の人だけ “その回次に到達した” として数える
+    # =========================================================
+    df_iv["_eligible"] = False
+    for sid, g in df_iv.groupby("_student_key", sort=False):
+        eligible = True
+        for idx in g.index:
+            if eligible:
+                df_iv.loc[idx, "_eligible"] = True
+            eligible = eligible and is_pass(df_iv.loc[idx, col_result])
 
-        if s.endswith("について教えてください。") or s.endswith("について教えてください") or s.endswith("について教えて下さい。"):
-            core = re.sub(r"(について教えてください。?|について教えて下さい。?)$", "", s).strip()
-            if re.search(r"(できた|できて|評価された|不足していた|懸念が残った|払拭した)$", core):
-                return False
+    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
+    
+    
+        # =========================================================
+    # ★回次ごとの「人数カウント（件数）」をフォネル式で作る（動的ステージ対応）
+    #  1回目: コホート全員（_eligible=True の round_index==1）
+    #  2回目: 1回目を通過して、2回目ログがある人（_eligible=True の round_index==2）
+    #  ...
+    #  最終: 直前まで通過して、最終回ログがある人（_eligible=True の round_index==max_rounds）
+    #  ※ 0件は返さない（UIに出ない）
+    # =========================================================
 
-        return True
+    def _num_to_kanji(n: int) -> str:
+        m = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八", 9: "九", 10: "十"}
+        return m.get(int(n), str(n))
+
+    # この企業（この df_iv）の最大回数
+    max_rounds = int(df_iv["round_index"].max()) if len(df_iv) else 1
+    if max_rounds < 1:
+        max_rounds = 1
+
+    # ステージ生成
+    # - 1回だけ: 一次のみ（最終にしない）
+    # - 2回: 一次・二次（最終にしない）
+    # - 3回以上: 一次..(max-1)次, 最終
+    STAGES: list[tuple[str, int]] = []
+    if max_rounds == 1:
+        STAGES = [("一次面接", 1)]
+    elif max_rounds == 2:
+        STAGES = [("一次面接", 1), ("二次面接", 2)]
+    else:
+        for i in range(1, max_rounds):
+            STAGES.append((f"{_num_to_kanji(i)}次面接", i))
+        STAGES.append(("最終面接", max_rounds))
 
     records = []
-    for label in ordered_labels:
-        sub = df_top[df_top["round_label"] == label].copy()
-        if sub.empty:
+    for label, ridx in STAGES:
+        sub = df_iv[
+            (df_iv["round_index"] == ridx)
+            & (df_iv["_eligible"] == True)
+        ].copy()
+
+        # 件数＝その回に到達して実際に受けた人数
+        count_people = int(sub["_student_key"].nunique())
+
+        # ★ 0件の回次は表示しない
+        if count_people == 0:
             continue
 
+        # 形式（列優先で判定）
         types = []
+        for v in sub[col_format].fillna("").astype(str).tolist():
+            vv = v.strip()
+            if "オンライン" in vv or "WEB" in vv.upper():
+                types.append("オンライン")
+            elif "対面" in vv or "来社" in vv:
+                types.append("対面")
+            else:
+                types.append("不明")
+        type_label = Counter(types).most_common(1)[0][0] if types else ""
+
+        # この回の面接テキスト
+        round_texts_for_ai = sub[col_text].fillna("").astype(str).tolist()
+
+        # フォールバック（ルール質問）
         all_questions = []
         memos = []
-        round_texts_for_ai = []
-
-        for _, r in sub.iterrows():
-            fmt_val = str(r.get(col_format, "") or "")
-            types.append("オンライン" if ("オンライン" in fmt_val or "WEB" in fmt_val.upper()) else "対面")
-
-            raw_text = str(r.get(col_text, "") or "")
-            if raw_text.strip():
-                round_texts_for_ai.append(raw_text)
-
-            # フォールバック用：ルール抽出
+        for raw_text in round_texts_for_ai[:200]:
             qs_raw = extract_questions(raw_text, max_q=12)
-            qs = []
             for q in qs_raw:
                 if any(w in q for w in QUESTION_NG_WORDS):
                     continue
-                q2 = normalize_to_question(q)
-                if _is_good_question(q2):
-                    qs.append(q2)
-            qs = qs[:5]
-            all_questions.extend(qs)
-
+                all_questions.append(normalize_to_question(q))
             t = clean_text(raw_text)
             if t:
                 memos.append(t[:120])
 
-        type_label = Counter(types).most_common(1)[0][0] if types else ""
-
         top_questions = []
         memo_text = ""
 
-        # 右AI（失敗したらフォールバック）
+        # 右AI
         if ENABLE_RIGHT_AI:
             qs_ai, memo_ai = build_right_ai_questions_and_memo(
                 company_name=str(company_name).strip(),
@@ -913,7 +971,7 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
                 top_k=5,
             )
             qs_ai = [normalize_to_question(q) for q in qs_ai]
-            qs_ai = [q for q in qs_ai if _is_good_question(q)]
+            qs_ai = [q for q in qs_ai if q and not any(w in q for w in QUESTION_NG_WORDS)]
             if qs_ai:
                 top_questions = qs_ai[:5]
             if isinstance(memo_ai, str) and memo_ai.strip():
@@ -933,7 +991,94 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
                 "title": label,
                 "year": "",
                 "term": "",
-                "status": f"{len(sub)}件",
+                "status": f"{count_people}件",
+                "type": type_label,
+                "questions": top_questions,
+                "memo": memo_text,
+                "start_datetime": "",
+            }
+        )
+
+    return records
+
+    # =========================================================
+    # ★回次ごとの「人数カウント（件数）」を作る
+    # =========================================================
+    records = []
+    for label in ordered_labels:
+        sub = df_iv[(df_iv["round_label"] == label) & (df_iv["_eligible"] == True)].copy()
+
+        # ★最終面接だけ「最後の回」限定（ここが決定打）
+        if label == "最終面接":
+            sub = sub[sub["_is_final"] == True].copy()
+
+        if sub.empty:
+            continue
+
+        # 件数＝学生数（人の数）
+        count_people = sub["_student_key"].nunique()
+
+        # 形式（列優先で判定）
+        types = []
+        for v in sub[col_format].fillna("").astype(str).tolist():
+            vv = v.strip()
+            if "オンライン" in vv or "WEB" in vv.upper():
+                types.append("オンライン")
+            elif "対面" in vv or "来社" in vv:
+                types.append("対面")
+            else:
+                types.append("不明")
+        type_label = Counter(types).most_common(1)[0][0] if types else ""
+
+        # この回次の面接テキスト（AI用）
+        round_texts_for_ai = sub[col_text].fillna("").astype(str).tolist()
+
+        # フォールバック（ルール質問）
+        all_questions = []
+        memos = []
+        for raw_text in round_texts_for_ai[:200]:
+            qs_raw = extract_questions(raw_text, max_q=12)
+            for q in qs_raw:
+                if any(w in q for w in QUESTION_NG_WORDS):
+                    continue
+                all_questions.append(normalize_to_question(q))
+            t = clean_text(raw_text)
+            if t:
+                memos.append(t[:120])
+
+        top_questions = []
+        memo_text = ""
+
+        # 右AI
+        if ENABLE_RIGHT_AI:
+            qs_ai, memo_ai = build_right_ai_questions_and_memo(
+                company_name=str(company_name).strip(),
+                round_label=label,
+                texts=round_texts_for_ai,
+                top_k=5,
+            )
+            qs_ai = [normalize_to_question(q) for q in qs_ai]
+            qs_ai = [q for q in qs_ai if q and not any(w in q for w in QUESTION_NG_WORDS)]
+            if qs_ai:
+                top_questions = qs_ai[:5]
+            if isinstance(memo_ai, str) and memo_ai.strip():
+                memo_text = memo_ai.strip()
+
+        if not top_questions:
+            q_counter = Counter([q.strip() for q in all_questions if q.strip()])
+            top_questions = [q for q, _ in q_counter.most_common(5)]
+
+        if not memo_text:
+            memo_text = " / ".join(memos[:2]).strip()
+            memo_text = memo_text[:180] + ("…" if len(memo_text) > 180 else "")
+
+        records.append(
+            {
+                "id": label,
+                "title": label,
+                "year": "",
+                "term": "",
+                "status": f"{count_people}件",
                 "type": type_label,
                 "questions": top_questions,
                 "memo": memo_text,
