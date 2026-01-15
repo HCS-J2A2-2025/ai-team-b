@@ -1,11 +1,9 @@
 /* =========================
-   Result.css（完全版）
-   - 検索バー＆サジェスト：あなたの参考CSS準拠
-   - 2カラム＋カード：崩れにくい版
+   Result.css（完全・確定版）
+   - Search.css と共存
+   - 2カラムは Grid で固定（長文でも崩れない）
+   - 受験記録一覧が消えない
 ========================= */
-
-/* ===== responsive (search row) ===== */
-/* Removed result-specific search row responsiveness to unify search styling */
 
 /* ===== loading spinner ===== */
 .loading-spinner {
@@ -27,8 +25,8 @@
 .result-container {
   min-height: 100vh;
   background-color: #f5f5f5;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans",
-    "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Hiragino Sans", "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
 }
 
 .result-main-content {
@@ -47,64 +45,32 @@
   margin-bottom: 32px;
 }
 
-/* result-search-form removed: using generic search-area classes */
-
-/* result-search-input-row removed */
-
-/* result-search-wrapper removed */
-
-/* result-search-input-wrapper removed */
-
-/* result-search-input-wrapper-has-suggest removed */
-
-/* result-search-icon removed */
-
-/* result-search-input removed */
-
-/* result-search-button removed */
-
-/* result-search-button:disabled removed */
-
-/* result-search-button-loading removed */
-
-/* result-suggest-panel removed */
-
-/* result-suggest-loading removed */
-
-/* result-suggest-row removed */
-
-/* result-suggest-row:hover removed */
-
-/* result-suggest-icon removed */
-
-/* result-suggest-text removed */
-
-/* ===== cards layout ===== */
+/* ===== cards layout（★重要：Grid固定） ===== */
 .result-content-grid {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 30px;
   align-items: stretch;
 }
 
-.result-card {
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-  border: 1px solid #e8e8e8;
-  flex: 1 1 420px;
-  /* ← 横並びになりやすく */
-  min-width: 360px;
-  /* ← 2カラム維持 */
-  max-width: 100%;
-  box-sizing: border-box;
+@media (max-width: 900px) {
+  .result-content-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
-@media (max-width: 900px) {
-  .result-card {
-    min-width: 100%;
-  }
+.result-card {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 30px;
+  border: 1px solid #e8e8e8;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
+  box-sizing: border-box;
+
+  /* 長文安全対策 */
+  min-width: 0;
+  word-break: break-word;
+  overflow-wrap: anywhere;
 }
 
 /* ===== AI report ===== */
@@ -153,20 +119,19 @@
   border: 1px solid #e0e0e0;
   border-radius: 8px;
   overflow: hidden;
-  transition: all 0.2s ease;
   background: #fff;
+  transition: background-color 0.2s ease;
 }
 
 .result-record-button {
   width: 100%;
   padding: 18px 20px;
-  background: white;
+  background: #ffffff;
   border: none;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  transition: background-color 0.2s ease;
   font-family: inherit;
 }
 
@@ -293,7 +258,6 @@
   width: 100%;
   max-width: 900px;
   margin-top: 8px;
-  margin-bottom: 0;
   color: #d32f2f;
   font-size: 14px;
 }
