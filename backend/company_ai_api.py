@@ -3,7 +3,9 @@ import time
 import uuid
 import re
 import pandas as pd
+import cache_api as capi
 
+from cache_api import router as cache_router
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -45,6 +47,7 @@ csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 
 # ルーター登録
+app.include_router(cache_router)
 app.include_router(csv_router)
 # app.include_router(followup_router)
 
@@ -123,6 +126,19 @@ def _get_company_names_from_report() -> list[str]:
     target_col = next((c for c in col_candidates if c in df.columns), None)
     if not target_col:
         return []
+    
+
+def _get_company_names_from_report() -> list[str]:
+    try:
+        df = load_report_df_normalized()
+    except Exception as e:
+        print("[WARN] load_report_df_normalized failed:", e)
+        return []
+
+    col_candidates = ["企業名", "company_name"]
+    target_col = next((c for c in col_candidates if c in df.columns), None)
+    if not target_col:
+        return []
 
     names = (
         df[target_col]
@@ -137,6 +153,28 @@ def _get_company_names_from_report() -> list[str]:
     return names
 
 
+def _try_get_company_from_json_cache(name: str) -> dict | None:
+    """
+    cache_updater が生成した company_cache_all.json から company を探して返す。
+    found は company単位の dict: { company, report, records }
+    """
+    raw = (name or "").strip()
+    if not raw:
+        return None
+
+    try:
+        data = capi._load_all_cache_or_raise()
+        comps = capi._get_companies_map(data)
+        found, _ = capi._lookup_company(comps, raw)
+        if found is None or not isinstance(found, dict):
+            return None
+        return found
+    except Exception as e:
+        # キャッシュがない/壊れてる等は「落とさず」オンデマンドへ
+        print("[WARN] json cache read failed:", e)
+        return None
+
+
 # =========================
 # Report build (internal)
 # =========================
@@ -145,6 +183,52 @@ def _create_report(name: str, student_no: str | None = None):
     if not keyword:
         return None, {"error": "企業名が空です"}
 
+    # =========================================================
+    # ✅ まず JSON キャッシュを参照（cache_updater 出力）
+    # =========================================================
+    cached = _try_get_company_from_json_cache(keyword)
+    if cached is not None:
+        company_name = str(cached.get("company") or keyword).strip()
+        report = str(cached.get("report") or "").strip()
+
+        # cache_updater は "records" で保存
+        cached_records = cached.get("records", [])
+        if not isinstance(cached_records, list):
+            cached_records = []
+
+        # student_no が無いならキャッシュだけで完結
+        if student_no is None:
+            return None, {
+                "company": company_name,
+                "report": report if USE_LEFT_AI else "",
+                "interviews": cached_records,  # API内部は interviews に統一
+                "texts": [],  # cache_updater は texts を保存していないので空
+                "source": "json_cache",
+            }
+
+        # student_no 指定がある場合：
+        # - 左はキャッシュ利用（高速）
+        # - 右は個人指定で作り直す（企業全体recordsだと混ざるため）
+        csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
+        csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
+
+        try:
+            interviews = build_interview_records_for_company(company_name, student_no)
+        except Exception as e:
+            print("[WARN] build_interview_records_for_company failed:", e)
+            interviews = []
+
+        return None, {
+            "company": company_name,
+            "report": report if USE_LEFT_AI else "",
+            "interviews": interviews,
+            "texts": [],
+            "source": "json_cache+student_filter",
+        }
+
+    # =========================================================
+    # ❌ キャッシュが無い → 従来どおり CSV から生成
+    # =========================================================
     try:
         df = load_report_df_normalized()
     except Exception as e:
@@ -154,13 +238,12 @@ def _create_report(name: str, student_no: str | None = None):
     if col_company not in df.columns:
         return None, {"error": f"report_t_all.csv に {col_company} 列がありません"}
 
-    # 正規化
+    # 正規化（完全一致）
     norm_input = _normalize_company_name(keyword)
 
     df = df.copy()
     df["__norm_name"] = df[col_company].astype(str).apply(_normalize_company_name)
 
-    # 完全一致のみ許可
     hit = df[df["__norm_name"] == norm_input]
     if hit.empty:
         return None, {"error": "データに存在しません（完全一致が必要です）"}
@@ -168,6 +251,7 @@ def _create_report(name: str, student_no: str | None = None):
     df_company = df[df["__norm_name"] == norm_input].copy()
     df_company = df_company.drop(columns=["__norm_name"])
 
+    # summarize_company_with_error がある前提（あなたの import に合わせる）
     summary_row_dict, summary_err = summarize_company_with_error(df_company)
     if not summary_row_dict:
         reason = summary_err or "不明な理由"
@@ -178,33 +262,29 @@ def _create_report(name: str, student_no: str | None = None):
     if not company_name:
         return None, {"error": "company_name が空です"}
 
-    # 都度反映（起動後に USE_* を切り替えたくなっても安全）
+    # スイッチ反映
     csb.ENABLE_LEFT_AI = bool(USE_LEFT_AI)
     csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 
-    # =============================
-    # 左：AI要約（FastAPI側スイッチで制御）
-    # =============================
+    # 左：AI要約
     report = ""
     if USE_LEFT_AI:
         try:
-            report = generate_detailed_report(row)  # csb.ENABLE_LEFT_AI を見て空返しでもOK
+            report = generate_detailed_report(row) or ""
         except Exception as e:
             print("[WARN] generate_detailed_report failed:", e)
             report = ""
         if isinstance(report, str) and report.startswith("[ERROR]"):
             return None, {"error": f"AI要約に失敗しました: {report}"}
 
-    # =============================
-    # 右：面接一覧（company_summary_batch 側スイッチで制御）
-    # =============================
+    # 右：面接一覧
     try:
         interviews = build_interview_records_for_company(company_name, student_no)
     except Exception as e:
         print("[WARN] build_interview_records_for_company failed:", e)
         interviews = []
 
-    # 参考：最新の生テキスト（任意）
+    # 参考：最新の生テキスト
     try:
         texts = get_latest_interview_texts(company_name, limit=5)
     except Exception as e:
@@ -216,7 +296,9 @@ def _create_report(name: str, student_no: str | None = None):
         "report": report,
         "interviews": interviews,
         "texts": texts,
+        "source": "on_demand",
     }
+
 
 
 # =========================
@@ -450,6 +532,16 @@ def post_company_validate(req: CompanyValidateRequest):
     if _is_symbol_only(keyword):
         return {"ok": False, "error": "企業名に文字が含まれていません"}
 
+    # ✅ 追加：JSONキャッシュ優先
+    cached = _try_get_company_from_json_cache(keyword)
+    if cached is not None:
+        return {
+            "ok": True,
+            "company": str(cached.get("company") or keyword).strip(),
+            "source": "json_cache",
+        }
+
+    # ---- キャッシュに無い場合だけCSVで確認 ----
     try:
         df = load_report_df_normalized()
     except Exception as e:
@@ -469,4 +561,4 @@ def post_company_validate(req: CompanyValidateRequest):
         return {"ok": False, "error": "データに存在しません（完全一致が必要です）"}
 
     matched = hit.iloc[0][col_company]
-    return {"ok": True, "company": str(matched).strip()}
+    return {"ok": True, "company": str(matched).strip(), "source": "csv"}

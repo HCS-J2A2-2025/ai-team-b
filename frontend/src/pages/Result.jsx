@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import AppHeader from "../components/AppHeader";
 import "../css/Result.css";
-// Use the same search styling as the Search page
 import "../css/Search.css";
 
 export default function Result() {
@@ -36,13 +35,11 @@ export default function Result() {
   // ✅ Search.jsx と同じサジェスト制御一式
   // =========================
   const suggestAbortRef = useRef(null);
-  const suppressSuggestRef = useRef(false); // 候補確定クリック直後の“復活”抑止
-  const suggestSeqRef = useRef(0); // 古いレスポンス破棄
+  const suppressSuggestRef = useRef(false);
+  const suggestSeqRef = useRef(0);
   const composingRef = useRef(false);
   const pendingSelectRef = useRef(null);
   const inputRef = useRef(null);
-
-  // 検索バー+サジェスト領域参照（外側クリックで閉じる）
   const searchWrapperRef = useRef(null);
 
   const applyPendingSelect = () => {
@@ -52,7 +49,6 @@ export default function Result() {
     }
   };
 
-  // 外側クリックでサジェストを閉じる（Search と同じ）
   useEffect(() => {
     const onDocMouseDown = (e) => {
       const root = searchWrapperRef.current;
@@ -61,8 +57,6 @@ export default function Result() {
       if (!root.contains(e.target)) {
         setSuggestions([]);
         setIsSuggestLoading(false);
-
-        // 進行中の通信も止める
         if (suggestAbortRef.current) suggestAbortRef.current.abort();
         suggestSeqRef.current++;
       }
@@ -72,18 +66,11 @@ export default function Result() {
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, []);
 
-  // 会社名の比較用（空白差・大小差を吸収）
-  const normalizeCompanyName = (s) =>
-    String(s ?? "")
-      .trim()
-      .replace(/\s+/g, " ")
-      .toLowerCase();
-
   const getReportId = (record, idx) =>
+    record?.public_id ||
     record?.id ||
     record?.report_id ||
     record?.reportId ||
-    record?.id ||
     record?.レポートID ||
     String(idx);
 
@@ -92,10 +79,7 @@ export default function Result() {
     if (Array.isArray(record.questions) && record.questions.length > 0) {
       return record.questions;
     }
-    if (
-      typeof record.question_content === "string" &&
-      record.question_content.trim()
-    ) {
+    if (typeof record.question_content === "string" && record.question_content.trim()) {
       return [record.question_content.trim()];
     }
     return [];
@@ -105,87 +89,125 @@ export default function Result() {
     typeof record?.memo === "string" && record.memo.trim() ? record.memo : "";
 
   const fetchCompanyReport = async (companyName) => {
-    const name = (companyName || "").trim();
-    if (!name) return;
+  const name = (companyName || "").trim();
+  if (!name) return;
 
-    setIsLoading(true);
-    setApiError(null);
-    setExpandedItem(null);
+  setIsLoading(true);
+  setApiError(null);
+  setExpandedItem(null);
 
-    setDetailsMap({});
-    setDetailLoadingMap({});
-    setDetailErrorMap({});
+  setDetailsMap({});
+  setDetailLoadingMap({});
+  setDetailErrorMap({});
 
-    let timerId = null;
-    timerId = setTimeout(() => setShowLoading(true), 200);
+  let timerId = null;
+  timerId = setTimeout(() => setShowLoading(true), 200);
 
+  try {
+    // =====================================================
+    // ✅ 1) まず JSONキャッシュ（POST）を見に行く
+    // =====================================================
     try {
-      // ① POST：request_id だけ返る
-      const res = await fetch("http://localhost:8000/api/company/report", {
+      const cacheRes = await fetch("http://localhost:8000/api/cache/company", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
 
-      const postData = await res.json().catch(() => ({}));
+      const cacheJson = await cacheRes.json().catch(() => null);
 
-      if (!res.ok || postData?.error) {
-        setApiError(
-          postData?.error || `取得に失敗しました（HTTP ${res.status}）`
-        );
-        return;
+      let cacheData = null;
+
+      if (cacheRes.ok && cacheJson && typeof cacheJson === "object") {
+        if (Array.isArray(cacheJson.records)) {
+          cacheData = cacheJson;
+        } else if (cacheJson.company && Array.isArray(cacheJson.company.records)) {
+          cacheData = cacheJson.company;
+        }
       }
 
-      const requestId = postData?.request_id;
-      if (!requestId) {
-        setReport("");
-        setRecords([]);
-        setApiError("request_id が返ってきませんでした（サーバー実装を確認）");
-        return;
+      if (
+        cacheRes.ok &&
+        cacheData &&
+        Array.isArray(cacheData.records) &&
+        cacheData.records.length > 0
+      ) {
+        setFixedCompanyName(name);
+        setReport(typeof cacheData.report === "string" ? cacheData.report : "");
+        setRecords(cacheData.records.slice(-10));
+        setApiError(null);
+        return; // ✅ キャッシュ命中 → ここで終了
       }
-
-      // ② POST：本体データを取得
-      const res2 = await fetch("http://localhost:8000/api/company/report/result", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ request_id: requestId }),
-      });
-
-      const data = await res2.json().catch(() => ({}));
-
-      if (!res2.ok || data?.error) {
-        setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
-        return;
-      }
-
-      setFixedCompanyName(name);
-
-      const reportText = data?.report ?? data?.result?.report ?? "";
-      setReport(reportText);
-
-      const list =
-        (Array.isArray(data?.records) && data.records) ||
-        (Array.isArray(data?.interviews) && data.interviews) ||
-        (Array.isArray(data?.result?.records) && data.result.records) ||
-        (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
-        [];
-
-      setRecords(list.slice(-10));
     } catch (e) {
-      setApiError("API 接続エラー：サーバーに接続できませんでした");
-    } finally {
-      clearTimeout(timerId);
-      setShowLoading(false);
-      setIsLoading(false);
+      console.warn("cache fetch failed, fallback to AI:", e);
     }
-  };
+
+    // =====================================================
+    // ✅ 2) キャッシュが無ければAI生成（POST→request_id→result）
+    // =====================================================
+    const res = await fetch("http://localhost:8000/api/company/report", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+
+    const postData = await res.json().catch(() => ({}));
+    if (!res.ok || postData?.error) {
+      setApiError(postData?.error || `取得に失敗しました（HTTP ${res.status}）`);
+      return;
+    }
+
+    const requestId = postData?.request_id;
+    if (!requestId) {
+      setReport("");
+      setRecords([]);
+      setApiError("request_id が返ってきませんでした（サーバー実装を確認）");
+      return;
+    }
+
+    const res2 = await fetch("http://localhost:8000/api/company/report/result", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request_id: requestId }),
+    });
+
+    const data = await res2.json().catch(() => ({}));
+    if (!res2.ok || data?.error) {
+      setApiError(data?.error || `取得に失敗しました（HTTP ${res2.status}）`);
+      return;
+    }
+
+    setFixedCompanyName(name);
+
+    const reportText = data?.report ?? data?.result?.report ?? "";
+    setReport(reportText);
+
+    const list =
+      (Array.isArray(data?.records) && data.records) ||
+      (Array.isArray(data?.interviews) && data.interviews) ||
+      (Array.isArray(data?.result?.records) && data.result.records) ||
+      (Array.isArray(data?.result?.interviews) && data.result.interviews) ||
+      [];
+
+    setRecords(Array.isArray(list) ? list.slice(-10) : []);
+  } catch (e) {
+    setApiError("API 接続エラー：サーバーに接続できませんでした");
+  } finally {
+    clearTimeout(timerId);
+    setShowLoading(false);
+    setIsLoading(false);
+  }
+};
+
 
   const fetchInterviewDetail = async (idx, record) => {
     const reportId = getReportId(record, idx);
+    if (!reportId) return;
     if (detailsMap[reportId]) return;
 
     setDetailLoadingMap((p) => ({ ...p, [reportId]: true }));
     setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
+
     try {
       const res = await fetch("http://localhost:8000/api/interview/detail", {
         method: "POST",
@@ -193,8 +215,7 @@ export default function Result() {
         body: JSON.stringify({ report_id: reportId }),
       });
 
-      const data = await res.json();
-
+      const data = await res.json().catch(() => ({}));
       if (!res.ok || data?.error) {
         setDetailErrorMap((p) => ({
           ...p,
@@ -221,18 +242,14 @@ export default function Result() {
     const record = records[idx];
     if (!record) return;
 
+    // ✅ 詳細APIを使うならここをON
     // await fetchInterviewDetail(idx, record);
   };
 
-  // =========================
-  // ✅ Search.jsx と同じサジェスト取得関数
-  // =========================
   const requestSuggest = async (keyword) => {
     if (suppressSuggestRef.current) return;
 
     const key = (keyword ?? "").trim();
-
-    // 空なら候補消す＆通信止める
     if (!key) {
       if (suggestAbortRef.current) suggestAbortRef.current.abort();
       setSuggestions([]);
@@ -240,10 +257,8 @@ export default function Result() {
       return;
     }
 
-    // この入力に対するリクエスト番号
     const seq = ++suggestSeqRef.current;
 
-    // 前回を中断
     if (suggestAbortRef.current) suggestAbortRef.current.abort();
     const controller = new AbortController();
     suggestAbortRef.current = controller;
@@ -251,7 +266,7 @@ export default function Result() {
     setIsSuggestLoading(true);
 
     try {
-      const res = await fetch("http://localhost:8000/company_suggest", {
+      const res = await fetch("http://localhost:8000/api/company/suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword }),
@@ -259,8 +274,6 @@ export default function Result() {
       });
 
       const data = await res.json().catch(() => ({}));
-
-      // 古い返りは捨てる
       if (seq !== suggestSeqRef.current) return;
       if (suppressSuggestRef.current) return;
 
@@ -283,12 +296,9 @@ export default function Result() {
   const handleSearchInputChange = (e) => {
     const value = e.target.value;
     setSearchQuery(value);
-
-    // 入力が変わった兆し → サジェスト更新
     requestSuggest(value);
   };
 
-  // クリックなど「入力する兆し」でサジェストを再表示（Search と同じ）
   const handleInputClick = () => {
     requestSuggest(searchQuery);
   };
@@ -296,22 +306,19 @@ export default function Result() {
   const handleSuggestionClick = (name) => {
     suppressSuggestRef.current = true;
 
-    // 進行中のサジェスト通信を止める
     if (suggestAbortRef.current) suggestAbortRef.current.abort();
-    suggestSeqRef.current++; // 遅れて返ったやつは捨てる
+    suggestSeqRef.current++;
 
     setSearchQuery(name);
     setSuggestions([]);
     setApiError(null);
     setIsSuggestLoading(false);
 
-    // 次にユーザーが入力したら再開
     setTimeout(() => {
       suppressSuggestRef.current = false;
     }, 0);
   };
 
-  // 比較専用：表示/送信には使わない
   const normalizeForCompare = (s) =>
     String(s ?? "")
       .replace(/\u3000/g, " ")
@@ -364,7 +371,6 @@ export default function Result() {
         <section className="result-search-area">
           <form className="search-area" onSubmit={handleSearchSubmit}>
             <div className="search-row">
-              {/* ✅ Search と同じ：search-wrapper を ref で囲う */}
               <div className="search-wrapper" ref={searchWrapperRef}>
                 <div
                   className={`search-input-wrapper ${
@@ -405,7 +411,6 @@ export default function Result() {
                         key={name}
                         className="suggest-row"
                         onMouseDown={(e) => {
-                          // ✅ Search と同じ：外側クリック判定/blurより先に確定させる
                           e.preventDefault();
                           e.stopPropagation();
 
@@ -456,18 +461,16 @@ export default function Result() {
 
             <div className="result-records-list">
               {records.length === 0 && !isLoading && (
-                <p className="result-muted">
-                  この企業の面接記録はまだ登録されていません。
-                </p>
+                <p className="result-muted">この企業の面接記録はまだ登録されていません。</p>
               )}
 
               {records.map((record, idx) => {
                 const isOpen = expandedItem === idx;
 
                 const reportId = getReportId(record, idx);
-                const detail = detailsMap[reportId];
-                const isDetailLoading = !!detailLoadingMap[reportId];
-                const detailErr = detailErrorMap[reportId];
+                const detail = reportId ? detailsMap[reportId] : null;
+                const isDetailLoading = reportId ? !!detailLoadingMap[reportId] : false;
+                const detailErr = reportId ? detailErrorMap[reportId] : "";
 
                 const displayQuestions =
                   Array.isArray(detail?.questions) && detail.questions.length > 0
@@ -480,10 +483,15 @@ export default function Result() {
                     : getFallbackMemoFromRecord(record);
 
                 const displayQuestionContent =
-                  typeof detail?.question_content === "string" &&
-                  detail.question_content.trim()
+                  typeof detail?.question_content === "string" && detail.question_content.trim()
                     ? detail.question_content
                     : "";
+
+                // ✅ 適性検査判定（バックで kind を入れてるならそれが最優先）
+                const isAptitude =
+                  record?.kind === "aptitude" ||
+                  record?.id === "適正検査" ||
+                  record?.title === "適正検査";
 
                 return (
                   <div key={`${reportId}-${idx}`} className="result-record-item">
@@ -493,11 +501,11 @@ export default function Result() {
                       className="result-record-button"
                     >
                       <div className="result-record-info">
-                        <span className="result-record-title">{record.title}</span>
-                        <span className="result-record-meta">{record.year}</span>
-                        <span className="result-record-meta">{record.term}</span>
-                        <span className="result-record-status">{record.status}</span>
-                        <span className="result-record-meta">{record.type}</span>
+                        <span className="result-record-title">{record?.title ?? ""}</span>
+                        <span className="result-record-meta">{record?.year ?? ""}</span>
+                        <span className="result-record-meta">{record?.term ?? ""}</span>
+                        <span className="result-record-status">{record?.status ?? ""}</span>
+                        <span className="result-record-meta">{record?.type ?? ""}</span>
                       </div>
 
                       <svg
@@ -522,30 +530,29 @@ export default function Result() {
 
                     {isOpen && (
                       <div className="result-record-detail">
-                        {isDetailLoading && (
-                          <p className="result-muted">詳細を読み込み中...</p>
-                        )}
+                        {isDetailLoading && <p className="result-muted">詳細を読み込み中...</p>}
                         {detailErr && <p className="result-error">{detailErr}</p>}
 
-                        <div className="result-detail-section-title">質問内容</div>
+                        <div className="result-detail-section-title">
+                          {isAptitude ? "試験内容" : "質問内容"}
+                        </div>
 
-                        {Array.isArray(displayQuestions) &&
-                        displayQuestions.length > 0 ? (
+                        {Array.isArray(displayQuestions) && displayQuestions.length > 0 ? (
                           displayQuestions.map((q, i) => (
                             <div key={i} className="result-q-line">
-                              {`Q${i + 1}. ${q}`}
+                              {isAptitude ? `・${q}` : `Q${i + 1}. ${q}`}
                             </div>
                           ))
                         ) : displayQuestionContent ? (
                           <div className="result-q-line">{displayQuestionContent}</div>
                         ) : (
-                          <div className="result-muted">質問が抽出できませんでした</div>
+                          <div className="result-muted">
+                            {isAptitude ? "試験内容が抽出できませんでした" : "質問が抽出できませんでした"}
+                          </div>
                         )}
 
                         <div className="result-detail-section-title">メモ・感想</div>
-                        <div className="result-memo-box">
-                          {displayMemo || "メモがありません"}
-                        </div>
+                        <div className="result-memo-box">{displayMemo || "メモがありません"}</div>
                       </div>
                     )}
                   </div>
