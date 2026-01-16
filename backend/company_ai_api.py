@@ -30,6 +30,7 @@ from company_summary_batch import (
     get_latest_interview_texts,
     load_report_df as load_report_df_normalized,
     summarize_company,
+    summarize_company_with_error,
     generate_student_ai_summary,
 )
 
@@ -167,9 +168,10 @@ def _create_report(name: str, student_no: str | None = None):
     df_company = df[df["__norm_name"] == norm_input].copy()
     df_company = df_company.drop(columns=["__norm_name"])
 
-    summary_row_dict = summarize_company(df_company)
+    summary_row_dict, summary_err = summarize_company_with_error(df_company)
     if not summary_row_dict:
-        return None, {"error": "この企業のサマリ生成に失敗しました"}
+        reason = summary_err or "不明な理由"
+        return None, {"error": f"この企業のサマリ生成に失敗しました: {reason}"}
 
     row = pd.Series(summary_row_dict)
     company_name = str(row.get("company_name", "") or "").strip()
@@ -190,6 +192,8 @@ def _create_report(name: str, student_no: str | None = None):
         except Exception as e:
             print("[WARN] generate_detailed_report failed:", e)
             report = ""
+        if isinstance(report, str) and report.startswith("[ERROR]"):
+            return None, {"error": f"AI要約に失敗しました: {report}"}
 
     # =============================
     # 右：面接一覧（company_summary_batch 側スイッチで制御）

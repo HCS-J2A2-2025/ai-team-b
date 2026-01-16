@@ -29,7 +29,7 @@ ENABLE_RIGHT_AI = True
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
-INPUT_CSV = os.path.join(BASE_DIR, "data", "report_t_all.csv")
+INPUT_CSV = os.path.join(BASE_DIR, "data", "取扱注意_過去の受験報告(生データ) (1).csv")
 OUTPUT_CSV = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
 
 LATEST_RECORDS_LIMIT = 5
@@ -92,24 +92,42 @@ def load_report_df():
     if "イベント種別" not in col_set and "event_kind" in col_set:
         rename_map["event_kind"] = "イベント種別"
 
-    if "結果種別" not in col_set and "result_status" in col_set:
-        rename_map["result_status"] = "結果種別"
+    if "結果種別" not in col_set:
+        if "result_status" in col_set:
+            rename_map["result_status"] = "結果種別"
+        elif "result_kind" in col_set:
+            rename_map["result_kind"] = "結果種別"
 
-    if "開始日時" not in col_set and "start_datetime" in col_set:
-        rename_map["start_datetime"] = "開始日時"
+    if "開始日時" not in col_set:
+        if "start_datetime" in col_set:
+            rename_map["start_datetime"] = "開始日時"
+        elif "start_date_time" in col_set:
+            rename_map["start_date_time"] = "開始日時"
 
-    if "終了日時" not in col_set and "end_datetime" in col_set:
-        rename_map["end_datetime"] = "終了日時"
+    if "終了日時" not in col_set:
+        if "end_datetime" in col_set:
+            rename_map["end_datetime"] = "終了日時"
+        elif "end_date_time" in col_set:
+            rename_map["end_date_time"] = "終了日時"
 
-    if "形式" not in col_set and "format" in col_set:
-        rename_map["format"] = "形式"
+    if "形式" not in col_set:
+        if "format" in col_set:
+            rename_map["format"] = "形式"
+        elif "exam_format" in col_set:
+            rename_map["exam_format"] = "形式"
 
     # 面接内容
-    if "面接内容" not in col_set and "report_text" in col_set:
-        rename_map["report_text"] = "面接内容"
+    if "面接内容" not in col_set:
+        if "report_text" in col_set:
+            rename_map["report_text"] = "面接内容"
+        elif "report_content" in col_set:
+            rename_map["report_content"] = "面接内容"
 
-    if "学籍番号" not in col_set and "student_no" in col_set:
-        rename_map["student_no"] = "学籍番号"
+    if "学籍番号" not in col_set:
+        if "student_no" in col_set:
+            rename_map["student_no"] = "学籍番号"
+        elif "user_no" in col_set:
+            rename_map["user_no"] = "学籍番号"
 
     if "メールアドレス" not in col_set:
         for cand in ["email", "mail", "メール", "Email", "e-mail"]:
@@ -133,6 +151,26 @@ def clean_text(text):
     text = re.sub(r"。+", "。", text)
     text = re.sub(r"、+", "、", text)
     return text.strip()
+
+
+def _filter_interview_only(df: pd.DataFrame, col_event: str) -> pd.DataFrame:
+    if col_event not in df.columns:
+        return df
+    s = df[col_event].astype(str).str.strip()
+
+    df_iv = df[s == "試験_面接"].copy()
+    if not df_iv.empty:
+        return df_iv
+
+    df_iv = df[s.str.contains("面接", na=False, regex=False)].copy()
+    if not df_iv.empty:
+        return df_iv
+
+    df_iv = df[s.str.contains("interview", na=False, case=False, regex=False)].copy()
+    if not df_iv.empty:
+        return df_iv
+
+    return df
 
 
 # ============================================================
@@ -658,9 +696,9 @@ def generate_student_ai_summary(student_id: str, max_records: int = 8) -> str:
 # ============================================================
 # 企業サマリ（company_summary_t の1行を作る）
 # ============================================================
-def summarize_company(group: pd.DataFrame) -> dict | None:
+def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str | None]:
     if group is None or group.empty:
-        return None
+        return None, "対象データが空です"
 
     col_company = "企業名"
     col_event = "イベント種別"
@@ -670,17 +708,21 @@ def summarize_company(group: pd.DataFrame) -> dict | None:
     col_text = "面接内容"
     col_report_id = "レポートID"
 
-    if col_company not in group.columns:
-        return None
+    required = [col_company, col_start, col_text]
+    missing = [c for c in required if c not in group.columns]
+    if missing:
+        return None, f"必須カラム不足: {missing}"
 
     company_name = str(group[col_company].iloc[0]).strip()
+    if not company_name:
+        return None, "企業名が空です"
+
     df = group.copy()
 
-    # 面接だけ
-    if col_event in df.columns:
-        df = df[df[col_event].astype(str).str.strip() == "試験_面接"].copy()
+    # 面接だけ（可能なら絞る、該当なしなら全件）
+    df = _filter_interview_only(df, col_event)
     if df.empty:
-        return None
+        return None, "面接ログがありません"
 
     # 日付
     if col_start in df.columns:
@@ -689,7 +731,7 @@ def summarize_company(group: pd.DataFrame) -> dict | None:
     else:
         df["start_dt_obj"] = pd.NaT
     if df.empty:
-        return None
+        return None, "開始日時が不正で日付が解釈できません"
 
     # テキスト
     if col_text in df.columns:
@@ -756,6 +798,11 @@ def summarize_company(group: pd.DataFrame) -> dict | None:
         "dress_code_dist": json.dumps(dict(dress), ensure_ascii=False),
         "latest_records": json.dumps(latest_records, ensure_ascii=False),
     }
+    return row, None
+
+
+def summarize_company(group: pd.DataFrame) -> dict | None:
+    row, _ = summarize_company_with_error(group)
     return row
 
 
@@ -797,8 +844,8 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         if df_company.empty:
             return []
 
-    # 面接のみ
-    df_iv = df_company[df_company[col_event].astype(str).str.strip() == "試験_面接"].copy()
+    # 面接のみ（可能なら絞る、該当なしなら全件）
+    df_iv = _filter_interview_only(df_company, col_event)
     if df_iv.empty:
         return []
 
