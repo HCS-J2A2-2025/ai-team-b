@@ -26,6 +26,7 @@ PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
 # =========================
 ENABLE_LEFT_AI = True
 ENABLE_RIGHT_AI = True
+ENABLE_ROUND_AI = True
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
@@ -196,6 +197,23 @@ def detect_format(text):
     return "不明"
 
 
+def normalize_format_value(value: str) -> str:
+    if not isinstance(value, str):
+        value = "" if value is None else str(value)
+    s = value.strip()
+    if not s:
+        return ""
+
+    upper = s.upper()
+    if "オンライン" in s or "WEB" in upper or "ONLINE" in upper:
+        return "オンライン"
+    if "対面" in s or "来社" in s or "OFFLINE" in upper:
+        return "対面"
+    if s in {"その他", "OTHER", "不明", "UNKNOWN"}:
+        return ""
+    return ""
+
+
 def detect_dress_code(text):
     if not isinstance(text, str):
         return "不明"
@@ -220,6 +238,65 @@ def detect_atmosphere_rule(text):
         score["圧迫感あり"] += 1
     top = max(score, key=score.get)
     return top if score[top] > 0 else "不明"
+
+
+# ============================================================
+# 回次抽出（テキスト内の "1次/一次/最終" 等）
+# ============================================================
+def _kanji_to_int(s: str) -> int | None:
+    table = {
+        "一": 1, "二": 2, "三": 3, "四": 4, "五": 5,
+        "六": 6, "七": 7, "八": 8, "九": 9, "十": 10,
+    }
+    return table.get(s)
+
+
+def detect_round_index_from_text(text: str) -> int | None:
+    if not isinstance(text, str):
+        return None
+    t = text
+
+    m = re.search(r"(?:第\s*)?(\d+)\s*(?:次|回目|回|次面接)", t)
+    if m:
+        try:
+            return int(m.group(1))
+        except Exception:
+            return None
+
+    m = re.search(r"(?:第\s*)?([一二三四五六七八九十])\s*(?:次|回目|回|次面接)", t)
+    if m:
+        return _kanji_to_int(m.group(1))
+
+    for k in ["一次", "二次", "三次", "四次", "五次", "六次", "七次", "八次", "九次", "十次"]:
+        if k in t:
+            return _kanji_to_int(k[:1])
+
+    return None
+
+
+def detect_is_final_from_text(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    return "最終" in text
+
+
+def is_info_session_text(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    t = text.strip()
+    if not t:
+        return False
+    return any(
+        kw in t
+        for kw in [
+            "説明会",
+            "会社説明会",
+            "オリエンテーション",
+            "セミナー",
+            "ガイダンス",
+            "座談会",
+        ]
+    )
 
 
 # ============================================================
@@ -446,6 +523,45 @@ def _extract_json_object(text: str) -> dict | None:
     return None
 
 
+def _extract_json_value(text: str):
+    if not isinstance(text, str):
+        return None
+    s = text.strip()
+
+    try:
+        return json.loads(s)
+    except Exception:
+        pass
+
+    m = re.search(r"```(?:json)?\s*([\s\S]+?)\s*```", s, flags=re.IGNORECASE)
+    if m:
+        inner = m.group(1).strip()
+        try:
+            return json.loads(inner)
+        except Exception:
+            pass
+
+    l = s.find("[")
+    r = s.rfind("]")
+    if l != -1 and r != -1 and r > l:
+        inner = s[l:r+1]
+        try:
+            return json.loads(inner)
+        except Exception:
+            pass
+
+    l = s.find("{")
+    r = s.rfind("}")
+    if l != -1 and r != -1 and r > l:
+        inner = s[l:r+1]
+        try:
+            return json.loads(inner)
+        except Exception:
+            pass
+
+    return None
+
+
 # ============================================================
 # 質問文っぽく正規化
 # ============================================================
@@ -489,6 +605,83 @@ def normalize_to_question(sentence: str) -> str:
         return s + "教えてください。"
 
     return f"{s}について教えてください。"
+
+
+# ============================================================
+# 回次推定（LLM）
+# ============================================================
+def infer_rounds_with_ai(records: list[dict]) -> dict[int, dict]:
+    if not records:
+        return {}
+
+    system = """
+あなたは就職活動の受験記録を正規化するアシスタントです。
+以下のルールに従って、面接区分を必ず「一次面接」または「最終面接」のどちらかに分類してください。
+
+【判別ルール（最優先）】
+1. 「最終」「Final」「最終選考」「役員面接」「社長面接」「内定直前」「意思確認」
+   → 必ず「最終面接」とする
+
+2. 「一次」「1次」「1st」「書類通過後」「最初の面接」「人事面接」
+   → 必ず「一次面接」とする
+
+【補助ルール】
+3. 面接回数が明示されていない場合：
+   - 面接が1回のみと記載されている → 「最終面接」
+   - 面接が複数回ある前提の記載 → 最初のものは「一次面接」
+
+※二次・三次など複数回の面接が存在する可能性がある
+
+4. オンライン／対面の別は面接区分の判断には一切影響しない
+
+5. 判断に迷う場合でも「不明」「その他」は使用せず、
+   文脈から最も妥当な方（一次 or 最終）を必ず選択する
+
+【出力制約】
+- 出力はJSON配列のみ
+- 各要素は { "idx": number, "label": "一次面接" | "最終面接" }
+- 理由や説明文は一切出力しない
+"""
+
+    lines = []
+    for r in records:
+        idx = r.get("idx")
+        dt = str(r.get("start_datetime", "") or "")
+        text = clean_text(str(r.get("text", "") or ""))[:600]
+        lines.append(f"[{idx}] {dt}\n{text}")
+
+    user = "以下の面接ログから回次を推定してください。\n\n" + "\n\n".join(lines)
+    out = ask_ai(user, system_prompt=system)
+    if isinstance(out, str) and out.startswith("[ERROR]"):
+        return {}
+
+    payload = _extract_json_value(out)
+    items = None
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
+        items = payload["items"]
+    if not items:
+        return {}
+
+    result = {}
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        idx = it.get("idx")
+        try:
+            idx = int(idx)
+        except Exception:
+            continue
+        label = str(it.get("label", "") or "").strip()
+        if label not in {"一次面接", "最終面接"}:
+            continue
+        if label == "一次面接":
+            result[idx] = {"round_index": 1, "is_final": False}
+        else:
+            result[idx] = {"round_index": None, "is_final": True}
+
+    return result
 
 
 # ============================================================
@@ -754,6 +947,9 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
         df["_text"] = df[col_text].fillna("").astype(str).map(clean_text)
     else:
         df["_text"] = ""
+    df = df[~df["_text"].map(is_info_session_text)].copy()
+    if df.empty:
+        return None, "面接ログがありません"
 
     atmos = Counter()
     form = Counter()
@@ -772,16 +968,15 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
     # 形式列がある場合は上書き（列が信頼できるならこちらが正）
     if col_format in df.columns:
         form = Counter()
-        for v in df[col_format].fillna("").astype(str).tolist():
-            vv = v.strip()
-            if not vv:
-                continue
-            if "オンライン" in vv or "WEB" in vv.upper():
-                form["オンライン"] += 1
-            elif "対面" in vv or "来社" in vv:
-                form["対面"] += 1
-            else:
-                form["不明"] += 1
+        formats = df[col_format].fillna("").astype(str).tolist()
+        texts = df["_text"].tolist()
+        for v, t in zip(formats, texts):
+            label = normalize_format_value(v)
+            if not label:
+                label = detect_format(t)
+            if not label:
+                label = "不明"
+            form[label] += 1
 
     top_tags = [k for k, _ in tag_counter.most_common(8)]
 
@@ -871,6 +1066,11 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     if df_iv.empty:
         return []
 
+    # 説明会などは除外（本文判定）
+    df_iv = df_iv[~df_iv[col_text].fillna("").astype(str).map(is_info_session_text)].copy()
+    if df_iv.empty:
+        return []
+
     # 学籍番号キー（無い/空は UNKNOWN）
     if col_student in df_iv.columns:
         df_iv["_student_key"] = df_iv[col_student].astype(str).fillna("").str.strip()
@@ -894,18 +1094,94 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         return []
 
     # =========================================================
-    # 回次：学生ごとに古→新で 1,2,3...
-    # total_rounds：学生ごとの総回数
+    # 回次：内容優先で判定（無ければ日時順）
     # =========================================================
+    def _round_label_from_index(idx: int) -> str:
+        m = {
+            1: "一次面接",
+            2: "二次面接",
+            3: "三次面接",
+            4: "四次面接",
+            5: "五次面接",
+            6: "六次面接",
+            7: "七次面接",
+            8: "八次面接",
+            9: "九次面接",
+            10: "十次面接",
+        }
+        return m.get(int(idx), f"{idx}次面接")
+
     df_iv = df_iv.sort_values(["_student_key", "start_dt_obj"])
-    df_iv["round_index"] = df_iv.groupby("_student_key").cumcount() + 1
+    df_iv["_order_index"] = df_iv.groupby("_student_key").cumcount() + 1
+    df_iv["_total_order_rounds"] = df_iv.groupby("_student_key")["_order_index"].transform("max")
+
+    texts = df_iv[col_text].fillna("").astype(str)
+    df_iv["_round_hint"] = texts.map(detect_round_index_from_text)
+    df_iv["_is_final_hint"] = texts.map(detect_is_final_from_text)
+
+    if ENABLE_ROUND_AI:
+        df_iv["_round_hint_ai"] = pd.NA
+        df_iv["_is_final_hint_ai"] = False
+
+        for sid, g in df_iv.groupby("_student_key", sort=False):
+            if g.empty:
+                continue
+            recs = []
+            for i, (_, row) in enumerate(g.iterrows()):
+                recs.append(
+                    {
+                        "idx": i,
+                        "start_datetime": str(row.get(col_start, "") or ""),
+                        "text": str(row.get(col_text, "") or ""),
+                    }
+                )
+            ai_map = infer_rounds_with_ai(recs)
+            if not ai_map:
+                continue
+            for i, (idx, _) in enumerate(g.iterrows()):
+                info = ai_map.get(i)
+                if not info:
+                    continue
+                if info.get("round_index") is not None:
+                    df_iv.loc[idx, "_round_hint_ai"] = info["round_index"]
+                if info.get("is_final") is True:
+                    df_iv.loc[idx, "_is_final_hint_ai"] = True
+
+        ai_hint = df_iv["_round_hint_ai"].notna()
+        df_iv.loc[ai_hint, "_round_hint"] = df_iv.loc[ai_hint, "_round_hint_ai"].astype(int)
+        df_iv["_is_final_hint"] = df_iv["_is_final_hint"] | df_iv["_is_final_hint_ai"]
+
+    df_iv["_max_round_hint"] = (
+        df_iv.groupby("_student_key")["_round_hint"]
+        .transform("max")
+        .fillna(0)
+        .astype(int)
+    )
+
+    df_iv["round_index"] = df_iv["_order_index"].astype(int)
+    hinted = df_iv["_round_hint"].notna()
+    df_iv.loc[hinted, "round_index"] = df_iv.loc[hinted, "_round_hint"].astype(int)
+
+    def _apply_final_round(row):
+        if row.get("_is_final_hint"):
+            return max(int(row.get("_total_order_rounds", 1)), int(row.get("_max_round_hint", 0)), int(row.get("round_index", 1)))
+        return int(row.get("round_index", 1))
+
+    df_iv["round_index"] = df_iv.apply(_apply_final_round, axis=1).astype(int)
+
     total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
 
     def _round_label(row):
-        key = str(row.get("_student_key", "UNKNOWN"))
+        if row.get("_is_final_hint"):
+            return "最終面接"
+        hint = row.get("_round_hint")
+        if pd.notna(hint):
+            try:
+                return _round_label_from_index(int(hint))
+            except Exception:
+                pass
         idx = int(row.get("round_index", 1))
-        total = int(total_rounds_map.get(key, idx))
-        return calc_round_label(idx, total)
+        return _round_label_from_index(max(idx, 1))
 
     df_iv["round_label"] = df_iv.apply(_round_label, axis=1)
 
@@ -922,16 +1198,42 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     # =========================================================
     PASS_WORDS = ["継続", "合格", "通過", "内々定", "次へ", "内定"]
     FAIL_WORDS = ["落選", "不合格", "見送り", "辞退", "不採用", "終了", "否"]
+    PASS_WORDS_EN = [
+        "CONTINUE",
+        "OFFERED",
+        "PASS",
+        "PASSED",
+        "SUCCESS",
+        "SUCCEED",
+        "NEXT",
+        "ADVANCE",
+        "PROCEED",
+        "ACCEPT",
+        "ACCEPTED",
+    ]
+    FAIL_WORDS_EN = [
+        "UNSUCCESS",
+        "FAIL",
+        "FAILED",
+        "DECLINE",
+        "REJECT",
+        "REJECTED",
+        "NOT PASS",
+        "NOT_PASS",
+        "NOTPASSED",
+        "NG",
+    ]
 
-    def is_pass(result_str: str) -> bool:
+    def is_pass(result_str: str) -> bool | None:
         s = str(result_str or "").strip()
         if not s:
+            return None
+        s_upper = s.upper()
+        if any(w in s for w in FAIL_WORDS) or any(w in s_upper for w in FAIL_WORDS_EN):
             return False
-        if any(w in s for w in FAIL_WORDS):
-            return False
-        if any(w in s for w in PASS_WORDS):
+        if any(w in s for w in PASS_WORDS) or any(w in s_upper for w in PASS_WORDS_EN):
             return True
-        return False
+        return None
 
     # =========================================================
     # ★「一次→二次→…」の通過ゲート
@@ -943,47 +1245,28 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         for idx in g.index:
             if eligible:
                 df_iv.loc[idx, "_eligible"] = True
-            eligible = eligible and is_pass(df_iv.loc[idx, col_result])
+            verdict = is_pass(df_iv.loc[idx, col_result])
+            if verdict is False:
+                eligible = False
+            elif verdict is True:
+                eligible = True
 
-    ordered_labels = ["一次面接", "二次面接", "三次面接", "最終面接"]
-    
-    
-        # =========================================================
-    # ★回次ごとの「人数カウント（件数）」をフォネル式で作る（動的ステージ対応）
-    #  1回目: コホート全員（_eligible=True の round_index==1）
-    #  2回目: 1回目を通過して、2回目ログがある人（_eligible=True の round_index==2）
-    #  ...
-    #  最終: 直前まで通過して、最終回ログがある人（_eligible=True の round_index==max_rounds）
-    #  ※ 0件は返さない（UIに出ない）
     # =========================================================
-
-    def _num_to_kanji(n: int) -> str:
-        m = {1: "一", 2: "二", 3: "三", 4: "四", 5: "五", 6: "六", 7: "七", 8: "八", 9: "九", 10: "十"}
-        return m.get(int(n), str(n))
-
-    # この企業（この df_iv）の最大回数
-    max_rounds = int(df_iv["round_index"].max()) if len(df_iv) else 1
-    if max_rounds < 1:
-        max_rounds = 1
-
-    # ステージ生成
-    # - 1回だけ: 一次のみ（最終にしない）
-    # - 2回: 一次・二次（最終にしない）
-    # - 3回以上: 一次..(max-1)次, 最終
-    STAGES: list[tuple[str, int]] = []
-    if max_rounds == 1:
-        STAGES = [("一次面接", 1)]
-    elif max_rounds == 2:
-        STAGES = [("一次面接", 1), ("二次面接", 2)]
-    else:
-        for i in range(1, max_rounds):
-            STAGES.append((f"{_num_to_kanji(i)}次面接", i))
-        STAGES.append(("最終面接", max_rounds))
+    # ★回次ごとの「人数カウント（件数）」を内容ベースで作る
+    # =========================================================
+    label_order = (
+        df_iv.groupby("round_label")["round_index"]
+        .min()
+        .sort_values()
+        .index.tolist()
+    )
+    if "最終面接" in label_order:
+        label_order = [l for l in label_order if l != "最終面接"] + ["最終面接"]
 
     records = []
-    for label, ridx in STAGES:
+    for label in label_order:
         sub = df_iv[
-            (df_iv["round_index"] == ridx)
+            (df_iv["round_label"] == label)
             & (df_iv["_eligible"] == True)
         ].copy()
 
@@ -996,14 +1279,15 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
 
         # 形式（列優先で判定）
         types = []
-        for v in sub[col_format].fillna("").astype(str).tolist():
-            vv = v.strip()
-            if "オンライン" in vv or "WEB" in vv.upper():
-                types.append("オンライン")
-            elif "対面" in vv or "来社" in vv:
-                types.append("対面")
-            else:
-                types.append("不明")
+        formats = sub[col_format].fillna("").astype(str).tolist()
+        texts = sub[col_text].fillna("").astype(str).tolist()
+        for v, t in zip(formats, texts):
+            fmt_label = normalize_format_value(v)
+            if not fmt_label:
+                fmt_label = detect_format(t)
+            if not fmt_label:
+                fmt_label = "不明"
+            types.append(fmt_label)
         type_label = Counter(types).most_common(1)[0][0] if types else ""
 
         # この回の面接テキスト
