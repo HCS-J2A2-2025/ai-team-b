@@ -293,6 +293,33 @@ export default function Result() {
     }
   };
 
+  // 「㈱」を入力欄のカーソル位置に挿入（重複は避ける）
+  const handleInsertKabu = () => {
+    const kabu = "㈱";
+    const el = inputRef.current;
+    const v = searchQuery ?? "";
+
+    if (v.includes(kabu)) {
+      requestAnimationFrame(() => el?.focus());
+      return;
+    }
+
+    const start = typeof el?.selectionStart === "number" ? el.selectionStart : v.length;
+    const end = typeof el?.selectionEnd === "number" ? el.selectionEnd : v.length;
+
+    const next = v.slice(0, start) + kabu + v.slice(end);
+    setSearchQuery(next);
+    setApiError(null);
+    requestSuggest(next);
+
+    requestAnimationFrame(() => {
+      el?.focus();
+      try {
+        el?.setSelectionRange(start + kabu.length, start + kabu.length);
+      } catch {}
+    });
+  };
+
   const handleSearchInputChange = (e) => {
     const value = e.target.value;
     setSearchQuery(value);
@@ -378,6 +405,16 @@ export default function Result() {
                   }`}
                 >
                   <span className="search-icon">🔍</span>
+                  <button
+                    type="button"
+                    className="kabu-inline-btn"
+                    title="㈱を入力"
+                    aria-label="㈱を入力"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={handleInsertKabu}
+                  >
+                    ㈱
+                  </button>
                   <input
                     ref={inputRef}
                     type="text"

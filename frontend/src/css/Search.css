@@ -147,6 +147,29 @@ body,
   color: #aaaaaa;
 }
 
+/* 検索バー内の「㈱」挿入ボタン */
+.kabu-inline-btn {
+  height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px solid #d8d8d8;
+  background: #f7f7f7;
+  color: #444;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 24px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.kabu-inline-btn:hover {
+  background: #efefef;
+}
+
+.kabu-inline-btn:active {
+  transform: scale(0.98);
+}
+
 .search-input::placeholder {
   color: #c4c4c4;
   font-weight: 400;
