@@ -115,18 +115,7 @@ def _is_symbol_only(s: str) -> bool:
     return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
 
 
-def _get_company_names_from_report() -> list[str]:
-    try:
-        df = load_report_df_normalized()
-    except Exception as e:
-        print("[WARN] load_report_df_normalized failed:", e)
-        return []
 
-    col_candidates = ["企業名", "company_name"]
-    target_col = next((c for c in col_candidates if c in df.columns), None)
-    if not target_col:
-        return []
-    
 
 def _get_company_names_from_report() -> list[str]:
     try:
@@ -463,24 +452,6 @@ def api_company_suggest(body: SuggestRequest):
     out = (prefix_hits + contains_hits)[:15]
     return {"candidates": out, "suggestions": out}
 
-
-@app.post("/company_suggest", response_model=SuggestResponseCompat)
-def company_suggest(body: SuggestRequestCompat):
-    q = (body.q or body.keyword or "").strip()
-    if not q:
-        return {"candidates": [], "suggestions": []}
-
-    names = _get_company_names_from_report()
-    if not names:
-        return {"candidates": [], "suggestions": []}
-
-    lower = q.lower()
-
-    prefix_hits = [n for n in names if n.lower().startswith(lower)]
-    contains_hits = [n for n in names if lower in n.lower() and n not in prefix_hits]
-
-    out = (prefix_hits + contains_hits)[:15]
-    return {"candidates": out, "suggestions": out}
 
 
 # =========================
