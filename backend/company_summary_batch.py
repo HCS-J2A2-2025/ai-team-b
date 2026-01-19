@@ -26,7 +26,7 @@ PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
 # =========================
 ENABLE_LEFT_AI = True
 ENABLE_RIGHT_AI = True
-ENABLE_ROUND_AI = True
+ENABLE_ROUND_AI = True  # 最終面接の判定にのみ使用
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
@@ -35,6 +35,9 @@ OUTPUT_CSV = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
 
 LATEST_RECORDS_LIMIT = 5
 DISPLAY_RECORD_LIMIT = 10  # 右側に出す最大件数（= 最新10人分）
+
+EVENT_KIND_INTERVIEW = "EXAM_INTERVIEW"
+EVENT_KIND_APTITUDE = "EXAM_APTITUDE"
 
 # ====== 質問に出したくない話題（合否・内定など） ======
 QUESTION_NG_WORDS = [
@@ -130,11 +133,12 @@ def load_report_df():
     if "学籍番号" not in col_set:
         if "student_no" in col_set:
             rename_map["student_no"] = "学籍番号"
-        elif "user_no" in col_set:
-            rename_map["user_no"] = "学籍番号"
 
     if rename_map:
         df = df.rename(columns=rename_map)
+
+    if "user_no" in df.columns and "学籍番号" not in df.columns:
+        df["学籍番号"] = df["user_no"]
 
     # =========================================================
     # 3) ★正規化（report_id が複数行に分割されている前提に対応）
@@ -248,17 +252,16 @@ def clean_text(text):
 def _filter_interview_only(df: pd.DataFrame, col_event: str) -> pd.DataFrame:
     if col_event not in df.columns:
         return df
-    s = df[col_event].astype(str).str.strip()
+    s = df[col_event].astype(str).str.strip().str.upper()
 
-    df_iv = df[s == "試験_面接"].copy()
-    if not df_iv.empty:
-        return df_iv
+    if s.isin({EVENT_KIND_INTERVIEW, EVENT_KIND_APTITUDE}).any():
+        return df[s == EVENT_KIND_INTERVIEW].copy()
 
     df_iv = df[s.str.contains("面接", na=False, regex=False)].copy()
     if not df_iv.empty:
         return df_iv
 
-    df_iv = df[s.str.contains("interview", na=False, case=False, regex=False)].copy()
+    df_iv = df[s.str.contains("INTERVIEW", na=False, case=False, regex=False)].copy()
     if not df_iv.empty:
         return df_iv
 
@@ -303,6 +306,71 @@ def normalize_format_value(value: str) -> str:
     if s in {"その他", "OTHER", "不明", "UNKNOWN"}:
         return ""
     return ""
+
+
+def _round_label_from_index(idx: int) -> str:
+    labels = {
+        1: "一次面接",
+        2: "二次面接",
+        3: "三次面接",
+        4: "四次面接",
+        5: "五次面接",
+        6: "六次面接",
+        7: "七次面接",
+        8: "八次面接",
+        9: "九次面接",
+        10: "十次面接",
+    }
+    return labels.get(int(idx), f"{int(idx)}次面接")
+
+
+def _has_online_strong_word(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    s = text.upper()
+    return any(
+        w in s
+        for w in [
+            "オンライン",
+            "WEB",
+            "ZOOM",
+            "TEAMS",
+            "GOOGLEMEET",
+            "MEET",
+            "SKYPE",
+        ]
+    )
+
+
+def _resolve_format_label(row: pd.Series, col_address_kind: str, col_address: str, col_format: str) -> str:
+    address_kind = str(row.get(col_address_kind, "") or "").strip()
+    address = str(row.get(col_address, "") or "").strip()
+    fmt = str(row.get(col_format, "") or "").strip()
+
+    if address_kind == "自宅":
+        return "オンライン"
+    if address_kind == "学校":
+        return "オンライン" if _has_online_strong_word(address + " " + fmt) else "対面"
+    if address_kind:
+        return "対面"
+
+    if _has_online_strong_word(address + " " + fmt):
+        return "オンライン"
+    return "対面"
+
+
+def _aggregate_format_labels(labels: list[str]) -> str:
+    online = sum(1 for x in labels if x == "オンライン")
+    offline = sum(1 for x in labels if x == "対面")
+    if online > 0 and offline == 0:
+        return "オンライン"
+    if offline > 0 and online == 0:
+        return "対面"
+    if online == 0 and offline == 0:
+        return ""
+    if abs(online - offline) <= 1:
+        return "オンライン・対面"
+    return "オンライン" if online > offline else "対面"
 
 
 def detect_dress_code(text):
@@ -775,6 +843,48 @@ def infer_rounds_with_ai(records: list[dict]) -> dict[int, dict]:
     return result
 
 
+def infer_is_final_round_with_ai(company_name: str, round_label: str, texts: list[str]) -> bool | None:
+    if not texts:
+        return None
+
+    cleaned = [clean_text(t) for t in texts if isinstance(t, str) and t.strip()]
+    if not cleaned:
+        return None
+
+    joined = "\n\n".join(f"- {t[:700]}" for t in cleaned[:8])
+    joined = joined[:6000]
+
+    system = """
+あなたは就職活動の面接ログから「最終面接かどうか」だけを判定するアシスタントです。
+出力は次の3択のみを厳守してください。
+
+最終である
+最終ではない
+判断不能
+""".strip()
+
+    user = f"""
+企業: {company_name}
+回次候補: {round_label}
+
+【面接ログ】
+{joined}
+""".strip()
+
+    out = ask_ai(user, system_prompt=system)
+    if not isinstance(out, str) or out.startswith("[ERROR]"):
+        return None
+
+    s = out.strip().replace("　", "")
+    if "最終である" in s:
+        return True
+    if "最終ではない" in s:
+        return False
+    if "判断不能" in s:
+        return None
+    return None
+
+
 # ============================================================
 # 右AI：質問TOP + memo を LLM で生成
 # ============================================================
@@ -1007,6 +1117,8 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
     col_format = "形式"
     col_text = "面接内容"
     col_report_id = "レポートID"
+    col_address = "address"
+    col_address_kind = "address_kind"
 
     required = [col_company, col_start, col_text]
     missing = [c for c in required if c not in group.columns]
@@ -1038,10 +1150,6 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
         df["_text"] = df[col_text].fillna("").astype(str).map(clean_text)
     else:
         df["_text"] = ""
-    df = df[~df["_text"].map(is_info_session_text)].copy()
-    if df.empty:
-        return None, "面接ログがありません"
-
     atmos = Counter()
     form = Counter()
     dress = Counter()
@@ -1052,21 +1160,13 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
             continue
         atmos[detect_atmosphere_rule(t)] += 1
         dress[detect_dress_code(t)] += 1
-        form[detect_format(t)] += 1
         for tg in detect_content_tags(t):
             tag_counter[tg] += 1
 
-    # 形式列がある場合は上書き（列が信頼できるならこちらが正）
-    if col_format in df.columns:
-        form = Counter()
-        formats = df[col_format].fillna("").astype(str).tolist()
-        texts = df["_text"].tolist()
-        for v, t in zip(formats, texts):
-            label = normalize_format_value(v)
-            if not label:
-                label = detect_format(t)
-            if not label:
-                label = "不明"
+    form = Counter()
+    for _, row in df.iterrows():
+        label = _resolve_format_label(row, col_address_kind, col_address, col_format)
+        if label:
             form[label] += 1
 
     top_tags = [k for k, _ in tag_counter.most_common(8)]
@@ -1080,7 +1180,7 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
         rec = {
             "start_datetime": str(r.get(col_start, "") or ""),
             "result": str(r.get(col_result, "") or ""),
-            "format": str(r.get(col_format, "") or ""),
+            "format": _resolve_format_label(r, col_address_kind, col_address, col_format),
             "memo": (t[:140] + "…") if len(t) > 140 else t,
             "questions": extract_questions(raw_text, max_q=3),
         }
@@ -1109,7 +1209,7 @@ def summarize_company(group: pd.DataFrame) -> dict | None:
 
 
 # ============================================================
-# 右側：最新10人分（学籍番号ごとの最新1件）を records として返す
+# 右側：最新10人分（user_no ごとの最新1件）を records として返す
 #   右AI ONなら：回次ごとの質問TOP5 + メモを LLM 生成
 # ============================================================
 def build_interview_records_for_company(company_name: str, student_no: str | None = None):
@@ -1117,13 +1217,14 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
 
     col_company = "企業名"
     col_event = "イベント種別"
-    col_result = "結果種別"      # 通過判定に使う
     col_start = "開始日時"
     col_format = "形式"
-    col_student = "学籍番号"
     col_text = "面接内容"
+    col_address = "address"
+    col_address_kind = "address_kind"
+    col_user = "user_no" if "user_no" in df.columns else "学籍番号"
 
-    required = [col_company, col_event, col_result, col_start, col_format, col_text]
+    required = [col_company, col_event, col_start, col_format, col_text]
     if not set(required).issubset(df.columns):
         print("[WARN] build_interview_records_for_company: 必須カラム不足:", df.columns.tolist())
         return []
@@ -1141,8 +1242,8 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
             return []
 
     # 個人モード（学生指定）※この場合はその学生だけの回次表示になる
-    if student_no is not None and col_student in df_company.columns:
-        df_company = df_company[df_company[col_student].astype(str).str.strip() == str(student_no).strip()].copy()
+    if student_no is not None and col_user in df_company.columns:
+        df_company = df_company[df_company[col_user].astype(str).str.strip() == str(student_no).strip()].copy()
         if df_company.empty:
             return []
 
@@ -1157,318 +1258,90 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     if df_iv.empty:
         return []
 
-    # 説明会などは除外（本文判定）
-    df_iv = df_iv[~df_iv[col_text].fillna("").astype(str).map(is_info_session_text)].copy()
-    if df_iv.empty:
-        return []
-
-    # 学籍番号キー（無い/空は UNKNOWN）
-    if col_student in df_iv.columns:
-        df_iv["_student_key"] = df_iv[col_student].astype(str).fillna("").str.strip()
-        df_iv.loc[df_iv["_student_key"] == "", "_student_key"] = "UNKNOWN"
+    # user_no キー（無い/空は UNKNOWN）
+    if col_user in df_iv.columns:
+        df_iv["_user_key"] = df_iv[col_user].astype(str).fillna("").str.strip()
+        df_iv.loc[df_iv["_user_key"] == "", "_user_key"] = "UNKNOWN"
     else:
-        df_iv["_student_key"] = "UNKNOWN"
+        df_iv["_user_key"] = "UNKNOWN"
 
     # =========================================================
     # ★コホートを作る：最新10人（＝右側の「10人」）
     # =========================================================
     if student_no is None:
         latest_dt_per_student = (
-            df_iv.groupby("_student_key")["start_dt_obj"]
+            df_iv.groupby("_user_key")["start_dt_obj"]
             .max()
             .sort_values(ascending=False)
         )
         cohort_keys = latest_dt_per_student.head(DISPLAY_RECORD_LIMIT).index.tolist()
-        df_iv = df_iv[df_iv["_student_key"].isin(cohort_keys)].copy()
+        df_iv = df_iv[df_iv["_user_key"].isin(cohort_keys)].copy()
 
     if df_iv.empty:
         return []
 
     # =========================================================
-    # 回次：内容優先で判定（無ければ日時順）
+    # 回次：user_no × start_date_time の昇順でロジック確定
     # =========================================================
-    def _round_label_from_index(idx: int) -> str:
-        m = {
-            1: "一次面接",
-            2: "二次面接",
-            3: "三次面接",
-            4: "四次面接",
-            5: "五次面接",
-            6: "六次面接",
-            7: "七次面接",
-            8: "八次面接",
-            9: "九次面接",
-            10: "十次面接",
-        }
-        return m.get(int(idx), f"{idx}次面接")
-
-    df_iv = df_iv.sort_values(["_student_key", "start_dt_obj"])
-    df_iv["_order_index"] = df_iv.groupby("_student_key").cumcount() + 1
-    df_iv["_total_order_rounds"] = df_iv.groupby("_student_key")["_order_index"].transform("max")
-
-    texts = df_iv[col_text].fillna("").astype(str)
-    df_iv["_round_hint"] = texts.map(detect_round_index_from_text)
-    df_iv["_is_final_hint"] = texts.map(detect_is_final_from_text)
-
-    if ENABLE_ROUND_AI:
-        df_iv["_round_hint_ai"] = pd.NA
-        df_iv["_is_final_hint_ai"] = False
-
-        for sid, g in df_iv.groupby("_student_key", sort=False):
-            if g.empty:
-                continue
-            recs = []
-            for i, (_, row) in enumerate(g.iterrows()):
-                recs.append(
-                    {
-                        "idx": i,
-                        "start_datetime": str(row.get(col_start, "") or ""),
-                        "text": str(row.get(col_text, "") or ""),
-                    }
-                )
-            ai_map = infer_rounds_with_ai(recs)
-            if not ai_map:
-                continue
-            for i, (idx, _) in enumerate(g.iterrows()):
-                info = ai_map.get(i)
-                if not info:
-                    continue
-                if info.get("round_index") is not None:
-                    df_iv.loc[idx, "_round_hint_ai"] = info["round_index"]
-                if info.get("is_final") is True:
-                    df_iv.loc[idx, "_is_final_hint_ai"] = True
-
-        ai_hint = df_iv["_round_hint_ai"].notna()
-        df_iv.loc[ai_hint, "_round_hint"] = df_iv.loc[ai_hint, "_round_hint_ai"].astype(int)
-        df_iv["_is_final_hint"] = df_iv["_is_final_hint"] | df_iv["_is_final_hint_ai"]
-
-    df_iv["_max_round_hint"] = (
-        df_iv.groupby("_student_key")["_round_hint"]
-        .transform("max")
-        .fillna(0)
-        .astype(int)
-    )
-
+    df_iv = df_iv.sort_values(["_user_key", "start_dt_obj"])
+    df_iv["_order_index"] = df_iv.groupby("_user_key").cumcount() + 1
     df_iv["round_index"] = df_iv["_order_index"].astype(int)
-    hinted = df_iv["_round_hint"].notna()
-    df_iv.loc[hinted, "round_index"] = df_iv.loc[hinted, "_round_hint"].astype(int)
 
-    def _apply_final_round(row):
-        if row.get("_is_final_hint"):
-            return max(int(row.get("_total_order_rounds", 1)), int(row.get("_max_round_hint", 0)), int(row.get("round_index", 1)))
-        return int(row.get("round_index", 1))
+    max_round_index = int(df_iv["round_index"].max()) if not df_iv.empty else 0
+    final_round_index = None
+    if ENABLE_ROUND_AI and max_round_index > 0:
+        candidate = df_iv[df_iv["round_index"] == max_round_index]
+        ai_verdict = infer_is_final_round_with_ai(
+            company_name=str(company_name).strip(),
+            round_label=_round_label_from_index(max_round_index),
+            texts=candidate[col_text].fillna("").astype(str).tolist(),
+        )
+        if ai_verdict is True:
+            final_round_index = max_round_index
 
-    df_iv["round_index"] = df_iv.apply(_apply_final_round, axis=1).astype(int)
-
-    total_rounds_map = df_iv.groupby("_student_key")["round_index"].max().to_dict()
-
-    def _round_label(row):
-        if row.get("_is_final_hint"):
+    # =========================================================
+    # =========================================================
+    # 回次ラベル（最終面接は候補のみAI判定）
+    # =========================================================
+    def _label_for_round(idx: int) -> str:
+        if final_round_index is not None and int(idx) == int(final_round_index):
             return "最終面接"
-        hint = row.get("_round_hint")
-        if pd.notna(hint):
-            try:
-                return _round_label_from_index(int(hint))
-            except Exception:
-                pass
-        idx = int(row.get("round_index", 1))
-        return _round_label_from_index(max(idx, 1))
+        return _round_label_from_index(idx)
 
-    df_iv["round_label"] = df_iv.apply(_round_label, axis=1)
+    df_iv["round_label"] = df_iv["round_index"].apply(_label_for_round)
 
-    # ★最後の回（真の最終）を明示（これが「最終10件」を止める）
-    df_iv["total_rounds"] = (
-        df_iv["_student_key"].map(total_rounds_map)
-        .fillna(df_iv["round_index"])
+    # =========================================================
+    # 回次ごとの「人数カウント（件数）」を user_no 単位で作る
+    # =========================================================
+    round_indices = (
+        df_iv["round_index"]
+        .dropna()
         .astype(int)
-    )
-    df_iv["_is_final"] = (df_iv["round_index"] == df_iv["total_rounds"])
-
-    # =========================================================
-    # ★通過判定（ここが画像のカウントの肝）
-    # =========================================================
-    PASS_WORDS = ["継続", "合格", "通過", "内々定", "次へ", "内定"]
-    FAIL_WORDS = ["落選", "不合格", "見送り", "辞退", "不採用", "終了", "否"]
-    PASS_WORDS_EN = [
-        "CONTINUE",
-        "OFFERED",
-        "PASS",
-        "PASSED",
-        "SUCCESS",
-        "SUCCEED",
-        "NEXT",
-        "ADVANCE",
-        "PROCEED",
-        "ACCEPT",
-        "ACCEPTED",
-    ]
-    FAIL_WORDS_EN = [
-        "UNSUCCESS",
-        "FAIL",
-        "FAILED",
-        "DECLINE",
-        "REJECT",
-        "REJECTED",
-        "NOT PASS",
-        "NOT_PASS",
-        "NOTPASSED",
-        "NG",
-    ]
-
-    def is_pass(result_str: str) -> bool | None:
-        s = str(result_str or "").strip()
-        if not s:
-            return None
-        s_upper = s.upper()
-        if any(w in s for w in FAIL_WORDS) or any(w in s_upper for w in FAIL_WORDS_EN):
-            return False
-        if any(w in s for w in PASS_WORDS) or any(w in s_upper for w in PASS_WORDS_EN):
-            return True
-        return None
-
-    # =========================================================
-    # ★「一次→二次→…」の通過ゲート
-    # eligible=True の人だけ “その回次に到達した” として数える
-    # =========================================================
-    df_iv["_eligible"] = False
-    for sid, g in df_iv.groupby("_student_key", sort=False):
-        eligible = True
-        for idx in g.index:
-            if eligible:
-                df_iv.loc[idx, "_eligible"] = True
-            verdict = is_pass(df_iv.loc[idx, col_result])
-            if verdict is False:
-                eligible = False
-            elif verdict is True:
-                eligible = True
-
-    # =========================================================
-    # ★回次ごとの「人数カウント（件数）」を内容ベースで作る
-    # =========================================================
-    label_order = (
-        df_iv.groupby("round_label")["round_index"]
-        .min()
         .sort_values()
-        .index.tolist()
+        .unique()
+        .tolist()
     )
-    if "最終面接" in label_order:
-        label_order = [l for l in label_order if l != "最終面接"] + ["最終面接"]
 
     records = []
-    for label in label_order:
-        sub = df_iv[
-            (df_iv["round_label"] == label)
-            & (df_iv["_eligible"] == True)
-        ].copy()
+    for round_idx in round_indices:
+        label = _label_for_round(round_idx)
+        sub = df_iv[df_iv["round_index"] == round_idx].copy()
 
         # 件数＝その回に到達して実際に受けた人数
-        count_people = int(sub["_student_key"].nunique())
+        count_people = int(sub["_user_key"].nunique())
 
         # ★ 0件の回次は表示しない
         if count_people == 0:
             continue
 
-        # 形式（列優先で判定）
-        types = []
-        formats = sub[col_format].fillna("").astype(str).tolist()
-        texts = sub[col_text].fillna("").astype(str).tolist()
-        for v, t in zip(formats, texts):
-            fmt_label = normalize_format_value(v)
-            if not fmt_label:
-                fmt_label = detect_format(t)
-            if not fmt_label:
-                fmt_label = "不明"
-            types.append(fmt_label)
-        type_label = Counter(types).most_common(1)[0][0] if types else ""
+        # オンライン/対面（厳密ルール）
+        types = [
+            _resolve_format_label(row, col_address_kind, col_address, col_format)
+            for _, row in sub.iterrows()
+        ]
+        type_label = _aggregate_format_labels(types) or ""
 
         # この回の面接テキスト
-        round_texts_for_ai = sub[col_text].fillna("").astype(str).tolist()
-
-        # フォールバック（ルール質問）
-        all_questions = []
-        memos = []
-        for raw_text in round_texts_for_ai[:200]:
-            qs_raw = extract_questions(raw_text, max_q=12)
-            for q in qs_raw:
-                if any(w in q for w in QUESTION_NG_WORDS):
-                    continue
-                all_questions.append(normalize_to_question(q))
-            t = clean_text(raw_text)
-            if t:
-                memos.append(t[:120])
-
-        top_questions = []
-        memo_text = ""
-
-        # 右AI
-        if ENABLE_RIGHT_AI:
-            qs_ai, memo_ai = build_right_ai_questions_and_memo(
-                company_name=str(company_name).strip(),
-                round_label=label,
-                texts=round_texts_for_ai,
-                top_k=5,
-            )
-            qs_ai = [normalize_to_question(q) for q in qs_ai]
-            qs_ai = [q for q in qs_ai if q and not any(w in q for w in QUESTION_NG_WORDS)]
-            if qs_ai:
-                top_questions = qs_ai[:5]
-            if isinstance(memo_ai, str) and memo_ai.strip():
-                memo_text = memo_ai.strip()
-
-        if not top_questions:
-            q_counter = Counter([q.strip() for q in all_questions if q.strip()])
-            top_questions = [q for q, _ in q_counter.most_common(5)]
-
-        if not memo_text:
-            memo_text = " / ".join(memos[:2]).strip()
-            memo_text = memo_text[:180] + ("…" if len(memo_text) > 180 else "")
-
-        records.append(
-            {
-                "id": label,
-                "title": label,
-                "year": "",
-                "term": "",
-                "status": f"{count_people}件",
-                "type": type_label,
-                "questions": top_questions,
-                "memo": memo_text,
-                "start_datetime": "",
-            }
-        )
-
-    return records
-
-    # =========================================================
-    # ★回次ごとの「人数カウント（件数）」を作る
-    # =========================================================
-    records = []
-    for label in ordered_labels:
-        sub = df_iv[(df_iv["round_label"] == label) & (df_iv["_eligible"] == True)].copy()
-
-        # ★最終面接だけ「最後の回」限定（ここが決定打）
-        if label == "最終面接":
-            sub = sub[sub["_is_final"] == True].copy()
-
-        if sub.empty:
-            continue
-
-        # 件数＝学生数（人の数）
-        count_people = sub["_student_key"].nunique()
-
-        # 形式（列優先で判定）
-        types = []
-        for v in sub[col_format].fillna("").astype(str).tolist():
-            vv = v.strip()
-            if "オンライン" in vv or "WEB" in vv.upper():
-                types.append("オンライン")
-            elif "対面" in vv or "来社" in vv:
-                types.append("対面")
-            else:
-                types.append("不明")
-        type_label = Counter(types).most_common(1)[0][0] if types else ""
-
-        # この回次の面接テキスト（AI用）
         round_texts_for_ai = sub[col_text].fillna("").astype(str).tolist()
 
         # フォールバック（ルール質問）
@@ -1544,8 +1417,9 @@ def get_latest_interview_texts(company_name: str, limit: int = 5):
 
     df = df[
         df[col_company].astype(str).str.contains(company_name, na=False, regex=False)
-        & (df[col_event].astype(str).str.strip() == "試験_面接")
     ].copy()
+
+    df = _filter_interview_only(df, col_event)
 
     if df.empty:
         return []
