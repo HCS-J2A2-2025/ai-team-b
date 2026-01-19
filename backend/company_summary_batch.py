@@ -30,7 +30,7 @@ ENABLE_ROUND_AI = True
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
-INPUT_CSV = os.path.join(BASE_DIR, "data", "取扱注意_過去の受験報告(生データ) (1).csv")
+INPUT_CSV = os.path.join(BASE_DIR, "data", "data-1768790126893.csv")
 OUTPUT_CSV = os.path.join(BASE_DIR, "data", "company_summary_t.csv")
 
 LATEST_RECORDS_LIMIT = 5
@@ -111,13 +111,16 @@ def load_report_df():
         elif "end_date_time" in col_set:
             rename_map["end_date_time"] = "終了日時"
 
+    # 「形式」相当の候補も吸収（あなたのCSVだと report_held_style っぽい）
     if "形式" not in col_set:
         if "format" in col_set:
             rename_map["format"] = "形式"
         elif "exam_format" in col_set:
             rename_map["exam_format"] = "形式"
+        elif "report_held_style" in col_set:
+            rename_map["report_held_style"] = "形式"
 
-    # 面接内容
+    # 面接内容（あなたのCSVだと report_content）
     if "面接内容" not in col_set:
         if "report_text" in col_set:
             rename_map["report_text"] = "面接内容"
@@ -130,16 +133,104 @@ def load_report_df():
         elif "user_no" in col_set:
             rename_map["user_no"] = "学籍番号"
 
-    if "メールアドレス" not in col_set:
-        for cand in ["email", "mail", "メール", "Email", "e-mail"]:
-            if cand in col_set:
-                rename_map[cand] = "メールアドレス"
-                break
-
     if rename_map:
         df = df.rename(columns=rename_map)
 
+    # =========================================================
+    # 3) ★正規化（report_id が複数行に分割されている前提に対応）
+    #    - 同一「レポートID」を 1行に集約
+    #    - 面接内容は連結して本文化
+    # =========================================================
+    if "レポートID" in df.columns:
+        df["_rid"] = df["レポートID"].astype(str).fillna("").str.strip()
+        # rid が空の行は「集約不能」なので、行ごとに一意IDを振って崩れないようにする
+        empty = df["_rid"] == ""
+        if empty.any():
+            df.loc[empty, "_rid"] = "NO_ID_" + df.index.astype(str)
+
+        # 代表値（空でないものを優先して取る）
+        def first_non_empty(s: pd.Series) -> str:
+            for v in s.tolist():
+                if v is None:
+                    continue
+                vv = str(v).strip()
+                if vv and vv.lower() not in {"nan", "none"}:
+                    return vv
+            return ""
+
+        # 面接内容は複数行を連結（重複や空は除外）
+        def join_texts(s: pd.Series) -> str:
+            parts = []
+            seen = set()
+            for v in s.tolist():
+                if v is None:
+                    continue
+                t = str(v).strip()
+                if not t or t.lower() in {"nan", "none"}:
+                    continue
+                t = re.sub(r"\s+", " ", t).strip()
+                if t and t not in seen:
+                    parts.append(t)
+                    seen.add(t)
+            # 行分割されている前提なので、改行でつなぐ（UIで読みやすい）
+            return "\n".join(parts)
+
+        # 日付は min/max（解釈できないものは NaT）
+        has_start = "開始日時" in df.columns
+        has_end = "終了日時" in df.columns
+        if has_start:
+            df["_start_dt"] = pd.to_datetime(df["開始日時"], errors="coerce")
+        else:
+            df["_start_dt"] = pd.NaT
+        if has_end:
+            df["_end_dt"] = pd.to_datetime(df["終了日時"], errors="coerce")
+        else:
+            df["_end_dt"] = pd.NaT
+
+        agg_map = {}
+
+        # 既存列は基本「代表値」を取る
+        for c in df.columns:
+            if c in {"_rid", "_start_dt", "_end_dt"}:
+                continue
+            if c == "面接内容":
+                agg_map[c] = join_texts
+            else:
+                agg_map[c] = first_non_empty
+
+        grouped = df.groupby("_rid", sort=False).agg(agg_map).reset_index(drop=True)
+
+        # 開始/終了は groupby で別集計して付与
+        dt = df.groupby("_rid", sort=False).agg(
+            _start_min=(" _start_dt".replace(" ", ""), "min") if False else ("_start_dt", "min"),
+            _end_max=(" _end_dt".replace(" ", ""), "max") if False else ("_end_dt", "max"),
+        )
+
+        # ↑pandas の列名を安全に扱うために素直に書き直し
+        dt = df.groupby("_rid", sort=False).agg(
+            _start_min=("_start_dt", "min"),
+            _end_max=("_end_dt", "max"),
+        )
+
+        dt = dt.reset_index()
+
+        # grouped は _rid がないので、いったん _rid を付けて merge
+        grouped["_rid"] = dt["_rid"].values
+        grouped = grouped.merge(dt[["_rid", "_start_min", "_end_max"]], on="_rid", how="left")
+        grouped = grouped.drop(columns=["_rid"])
+
+        # 開始/終了を戻す（ISO文字列にすると downstream が安定）
+        if "開始日時" in grouped.columns:
+            grouped["開始日時"] = grouped["_start_min"].dt.strftime("%Y-%m-%d %H:%M:%S")
+        if "終了日時" in grouped.columns:
+            grouped["終了日時"] = grouped["_end_max"].dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        grouped = grouped.drop(columns=[c for c in ["_start_min", "_end_max"] if c in grouped.columns])
+
+        df = grouped
+
     return df
+
 
 
 # ============================================================

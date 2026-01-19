@@ -10,6 +10,7 @@ import requests
 # ============================
 BASE_DIR = Path(__file__).resolve().parent
 CSV_CANDIDATES = [
+    BASE_DIR / "data" / "data-1768790126893.csv",
     BASE_DIR / "data" / "取扱注意_過去の受験報告(生データ) (1).csv",
     BASE_DIR / "data" / "report_t_all.csv",
 ]

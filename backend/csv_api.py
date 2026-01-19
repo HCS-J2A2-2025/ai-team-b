@@ -5,7 +5,7 @@ import pandas as pd
 router = APIRouter()
 
 UPLOAD_DIR = "data"
-MASTER_CSV = os.path.join(UPLOAD_DIR, "取扱注意_過去の受験報告(生データ) (1).csv")
+MASTER_CSV = os.path.join(UPLOAD_DIR, "data-1768790126893.csv")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
