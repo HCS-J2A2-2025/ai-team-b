@@ -2,6 +2,8 @@
 import time
 import uuid
 import re
+from pathlib import Path
+
 import pandas as pd
 import cache_api as capi
 
@@ -115,9 +117,28 @@ def _is_symbol_only(s: str) -> bool:
     return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
 
 
+SUGGEST_EVENT_KINDS = {"EXAM_INTERVIEW", "EXAM_APTITUDE"}
+_suggest_names_cache: list[str] = []
+_suggest_names_cache_mtime_ns: int | None = None
+
+
+def _get_source_csv_mtime_ns() -> int | None:
+    try:
+        p = Path(csb.INPUT_CSV)
+        return p.stat().st_mtime_ns if p.exists() else None
+    except Exception:
+        return None
+
+
 
 
 def _get_company_names_from_report() -> list[str]:
+    global _suggest_names_cache, _suggest_names_cache_mtime_ns
+
+    mtime_ns = _get_source_csv_mtime_ns()
+    if _suggest_names_cache and _suggest_names_cache_mtime_ns == mtime_ns:
+        return _suggest_names_cache
+
     try:
         df = load_report_df_normalized()
     except Exception as e:
@@ -129,6 +150,15 @@ def _get_company_names_from_report() -> list[str]:
     if not target_col:
         return []
 
+    col_event = "イベント種別" if "イベント種別" in df.columns else "event_kind"
+    if col_event in df.columns:
+        event_kind = df[col_event].astype(str).str.strip().str.upper()
+        df = df[event_kind.isin(SUGGEST_EVENT_KINDS)]
+        if df.empty:
+            _suggest_names_cache = []
+            _suggest_names_cache_mtime_ns = mtime_ns
+            return []
+
     names = (
         df[target_col]
         .dropna()
@@ -139,6 +169,8 @@ def _get_company_names_from_report() -> list[str]:
         .drop_duplicates()
         .tolist()
     )
+    _suggest_names_cache = names
+    _suggest_names_cache_mtime_ns = mtime_ns
     return names
 
 
