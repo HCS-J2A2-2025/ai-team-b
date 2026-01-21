@@ -24,12 +24,20 @@ from company_summary_batch import (
 # =========================
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_CSV_PATH = BASE_DIR / "data" / "report_t_all.csv"
+csv_path = BASE_DIR / "data" / "01_hokkaido_all_20251226.csv"
+json_path = BASE_DIR / "data" / "companies.json"
 
 CACHE_DIR = BASE_DIR / "data" / "cache"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 ALL_CACHE_PATH = CACHE_DIR / "company_cache_all.json"
 
+with open(csv_path, encoding="Shift_JIS") as f:
+    reader = csv.DictReader(f)
+    rows = list(reader)
+
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(rows, f, ensure_ascii=False)
 
 # =========================
 # Utilities

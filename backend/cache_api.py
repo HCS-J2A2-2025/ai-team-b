@@ -23,12 +23,12 @@ def _find_cache_file() -> Path:
 
     # 1) まず「このファイルの近く」を上に辿って data/cache を探す
     for p in [here.parent, *here.parents]:
-        cand = p / "data" / "cache" / "company_cache_all.json"
+        cand = p / "data" / "company_cache_all.json"
         if cand.exists():
             return cand
 
     # 2) 最後にフォールバック（存在しない可能性もあるが meta で確認できる）
-    return here.parent / "data" / "cache" / "company_cache_all.json"
+    return here.parent / "data" / "company_cache_all.json"
 
 
 ALL_CACHE_PATH = _find_cache_file()
