@@ -1,15 +1,32 @@
 import pandas as pd
-import List, Dict, Tuple
+from typing import List, Dict, Tuple
 import re
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from cache_api import router as cache_router
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ★ ここが重要：フロントは /api/cache/company を叩いている
+app.include_router(cache_router, prefix="/api/cache", tags=["cache"])
 
 target= pd.read_csv("data/01_hokkaido_all_20251226.csv"),
 encoding = "Shift_JIS",
-useclos=[7,11]
+usecols=[7,11]
 
 subject = pd.read_csv("data/data-1768790126893.csv"),
 encoding="utf-8",
-useclos = pd.read_csv("data/data-1768790126893.csv")["company_name"].to_dict()
-
+usecols = pd.read_csv("data/data-1768790126893.csv")["company_name"].to_dict()
 norm_name = pd.read_csv("data/norm_name.csv")["company_name"].to_dict()
 
 
@@ -145,3 +162,7 @@ def judge_match(log_company: str, log_addr: str, cand: Dict) -> Tuple[str, Dict]
     # -------------------------
     reason["rules_hit"].append("Z:no_rules")
     return "no", reason
+
+@app.get("/__routes")
+def __routes():
+    return sorted([getattr(r, "path", "") for r in app.routes])

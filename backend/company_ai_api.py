@@ -46,10 +46,10 @@ csb.ENABLE_RIGHT_AI = bool(USE_RIGHT_AI)
 # =========================
 # FastAPI (docs OFF)
 # =========================
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+app = FastAPI()  # ← search_company_api.pyのためにdocs_urlを動かす
 
 # ルーター登録
-app.include_router(cache_router)
+app.include_router(cache_router, prefix="/api/cache")
 app.include_router(csv_router)
 # app.include_router(followup_router)
 
@@ -565,3 +565,8 @@ def post_company_validate(req: CompanyValidateRequest):
 
     matched = hit.iloc[0][col_company]
     return {"ok": True, "company": str(matched).strip(), "source": "csv"}
+
+@app.get("/__routes")
+def __routes():
+    return sorted([getattr(r, "path", "") for r in app.routes])
+

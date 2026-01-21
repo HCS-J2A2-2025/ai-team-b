@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Tuple, Optional
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import JSONResponse
 
-router = APIRouter(prefix="/api/cache", tags=["cache"])
+router = APIRouter(tags=["cache"]) #search_company_api.pyで使うためにtags指定
 
 
 # =========================================================
@@ -16,19 +16,27 @@ router = APIRouter(prefix="/api/cache", tags=["cache"])
 # =========================================================
 def _find_cache_file() -> Path:
     """
-    cache_api.py の置き場所がどこでも、
-    backend/data/cache/company_cache_all.json をなるべく確実に見つける。
+    どこから起動しても company_cache_all.json を見つける
+    想定置き場:
+    backend/data/cache/company_cache_all.json
+    backend/data/company_cache_all.json（旧）
     """
     here = Path(__file__).resolve()
 
-    # 1) まず「このファイルの近く」を上に辿って data/cache を探す
     for p in [here.parent, *here.parents]:
-        cand = p / "data" / "company_cache_all.json"
-        if cand.exists():
-            return cand
+        # ✅ まず本命：data/cache/
+        cand1 = p / "data" / "cache" / "company_cache_all.json"
+        if cand1.exists():
+            return cand1
 
-    # 2) 最後にフォールバック（存在しない可能性もあるが meta で確認できる）
-    return here.parent / "data" / "company_cache_all.json"
+        # ✅ 旧置き場も一応見る：data/
+        cand2 = p / "data" / "company_cache_all.json"
+        if cand2.exists():
+            return cand2
+
+    # 見つからない時は本命パスを返してエラーメッセージで分かるように
+    return here.parent / "data" / "cache" / "company_cache_all.json"
+
 
 
 ALL_CACHE_PATH = _find_cache_file()
