@@ -44,6 +44,7 @@ export default function Result() {
   const pendingSelectRef = useRef(null);
   const inputRef = useRef(null);
   const searchWrapperRef = useRef(null);
+  const API_BASE = process.env.REACT_APP_API_BASE || "http://127.0.0.1:8000";
 
   const applyPendingSelect = () => {
     if (pendingSelectRef.current) {
@@ -128,7 +129,7 @@ export default function Result() {
     // =====================================================
     // ✅ 2) キャッシュが無ければAI生成（POST→request_id→result）
     // =====================================================
-    const res = await fetch("/api/company/report", {
+    const res = await fetch(`${API_BASE}/api/company/report`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -148,7 +149,7 @@ export default function Result() {
       return;
     }
 
-    const res2 = await fetch("/api/company/report/result", {
+    const res2 = await fetch(`${API_BASE}/api/company/report/result`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request_id: requestId }),
@@ -261,7 +262,7 @@ export default function Result() {
       suggestAbortRef.current = controller;
 
       try {
-        const res = await fetch("/api/company/suggest", {
+        const res = await fetch(`${API_BASE}/api/company/suggest`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ keyword: key }),

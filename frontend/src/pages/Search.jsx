@@ -1,4 +1,4 @@
-// Search.jsx
+﻿// Search.jsx
 import { useState, useRef, useEffect } from "react";
 import AppHeader from "../components/AppHeader";
 import { useNavigate } from "react-router-dom";
@@ -33,6 +33,10 @@ const inputRef = useRef(null);
 
 //検索バー+サジェスト領域を参照（外側クリックで閉じるため）
 const searchWrapperRef = useRef(null);
+
+// Search.jsx
+const API_BASE = process.env.REACT_APP_API_BASE || "http://127.0.0.1:8000";
+
 
 const applyPendingSelect = () => {
 if (pendingSelectRef.current) {
@@ -99,16 +103,16 @@ const handleSubmit = async (e) => {
 
     if (candidates.length === 0) {
         // ✅ suggestで「CSV上の正式名」を取って、それで遷移する
-        const sres = await fetch("/api/company_suggest", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ keyword: raw }),
+        const sres = await fetch(`${API_BASE}/api/company/suggest`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ keyword: raw }),
         });
 
         const sjson = await sres.json().catch(() => ({}));
         if (!sres.ok) {
-            setApiError(`入力チェックに失敗しました（HTTP ${sres.status}）`);
-            return;
+        setApiError(`入力チェックに失敗しました（HTTP ${sres.status}）`);
+        return;
         }
 
         const fetched = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
@@ -185,28 +189,29 @@ if (fileInputRef.current) {
 };
 
 const handleCsvUpload = async (file) => {
-if (!file) return;
+  if (!file) return;
 
-const formData = new FormData();
-formData.append("file", file);
+  const formData = new FormData();   // ← これが必須
+  formData.append("file", file);
 
-try {
-    const res = await fetch("/api/upload_csv", {
-    method: "POST",
-    body: formData,
+  try {
+    const res = await fetch(`${API_BASE}/api/upload_csv`, {  // ← API_BASE を付ける
+      method: "POST",
+      body: formData,
     });
 
-    const data = await res.json();
+    const data = await res.json().catch(() => ({}));
 
     if (data.status === "ok") {
-    alert("CSV アップロード成功: " + data.filename);
+      alert("CSV アップロード成功: " + data.filename);
     } else {
-    alert("CSV アップロードエラー: " + data.message);
+      alert("CSV アップロードエラー: " + (data.message ?? "unknown"));
     }
-} catch (e) {
+  } catch (e) {
     alert("サーバーに接続できません（API エラー）");
-}
+  }
 };
+
 
 // サジェスト取得処理を関数化（onChange と onClick から共通利用）
 const requestSuggest = async (keyword) => {
@@ -246,7 +251,7 @@ suggestTimerRef.current = setTimeout(async () => {
     suggestAbortRef.current = controller;
 
     try {
-    const res = await fetch("/api/company/suggest", {
+    const res = await fetch(`${API_BASE}/api/company/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword: key }),
