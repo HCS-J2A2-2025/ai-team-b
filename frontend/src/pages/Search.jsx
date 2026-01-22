@@ -37,6 +37,31 @@ const searchWrapperRef = useRef(null);
 // Search.jsx
 const API_BASE = process.env.REACT_APP_API_BASE || "http://127.0.0.1:8000";
 
+// 表示重複を潰すための「同一視キー」
+// ※法人格の位置（前株/後株）はここでは変えない。あくまで重複判定だけ。
+const normalizeCompanyKey = (s) => {
+  if (!s) return "";
+  return String(s)
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[()（）【】［］]/g, "")
+    .replace(/㈱|株式会社|（株）|\(株\)/g, "")
+    .toLowerCase();
+};
+
+const uniqByCompanyKey = (arr) => {
+  const out = [];
+  const seen = new Set();
+  for (const name of arr || []) {
+    const k = normalizeCompanyKey(name);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(name); // 表示は「最初に来た表記」を採用（勝手に前株/後株に変えない）
+  }
+  return out;
+};
+
+
 
 const applyPendingSelect = () => {
 if (pendingSelectRef.current) {
@@ -115,14 +140,17 @@ const handleSubmit = async (e) => {
         return;
         }
 
-        const fetched = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
+        const fetchedRaw = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
+        const fetched = uniqByCompanyKey(fetchedRaw);
+
         if (fetched.length === 0) {
-            setApiError("企業名が見つかりませんでした（候補なし）");
-            return;
+        setApiError("企業名が見つかりませんでした（候補なし）");
+        return;
         }
 
         suggestCacheRef.current.set(raw, fetched);
         const canonicalName = String(fetched[0]).trim();
+
         navigate("/result", { state: { companyName: canonicalName } });
         return;
     }
@@ -231,10 +259,10 @@ if (!key) {
 
 const cached = suggestCacheRef.current.get(key);
 if (Array.isArray(cached)) {
-    setSuggestions(cached);
-    setIsSuggestLoading(false);
-    lastSuggestKeyRef.current = key;
-    return;
+  setSuggestions(uniqByCompanyKey(cached)); // ★復活対策
+  setIsSuggestLoading(false);
+  lastSuggestKeyRef.current = key;
+  return;
 }
 
 if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
@@ -269,8 +297,10 @@ suggestTimerRef.current = setTimeout(async () => {
         return;
     }
 
-    const list = Array.isArray(data?.candidates) ? data.candidates : [];
-    suggestCacheRef.current.set(key, list);
+    const rawList = Array.isArray(data?.candidates) ? data.candidates : [];
+    const list = uniqByCompanyKey(rawList);
+
+    suggestCacheRef.current.set(key, list);   // ★必ず uniq 済みをキャッシュ
     lastSuggestKeyRef.current = key;
     setSuggestions(list);
     } catch (err) {

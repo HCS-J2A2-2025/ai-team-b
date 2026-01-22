@@ -46,6 +46,31 @@ export default function Result() {
   const searchWrapperRef = useRef(null);
   const API_BASE = process.env.REACT_APP_API_BASE || "http://127.0.0.1:8000";
 
+  // 表示重複を潰すための「同一視キー」
+// ※法人格の位置（前株/後株）はここでは変えない。あくまで重複判定だけ。
+const normalizeCompanyKey = (s) => {
+  if (!s) return "";
+  return String(s)
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/[()（）【】［］]/g, "")
+    .replace(/㈱|株式会社|（株）|\(株\)/g, "")
+    .toLowerCase();
+};
+
+const uniqByCompanyKey = (arr) => {
+  const out = [];
+  const seen = new Set();
+  for (const name of arr || []) {
+    const k = normalizeCompanyKey(name);
+    if (!k || seen.has(k)) continue;
+    seen.add(k);
+    out.push(name); // 表示は「最初に来た表記」を採用（勝手に前株/後株に変えない）
+  }
+  return out;
+};
+
+
   const applyPendingSelect = () => {
     if (pendingSelectRef.current) {
       handleSuggestionClick(pendingSelectRef.current);
@@ -244,7 +269,7 @@ export default function Result() {
 
     const cached = suggestCacheRef.current.get(key);
     if (Array.isArray(cached)) {
-      setSuggestions(cached);
+      setSuggestions(uniqByCompanyKey(cached));
       setIsSuggestLoading(false);
       lastSuggestKeyRef.current = key;
       return;
@@ -279,8 +304,9 @@ export default function Result() {
         }
 
         const list = data?.candidates || data?.suggestions || [];
-        const out = Array.isArray(list) ? list : [];
-        suggestCacheRef.current.set(key, out);
+        const raw = Array.isArray(list) ? list : [];
+        const out = uniqByCompanyKey(raw);
+        suggestCacheRef.current.set(key, out); // ★必ず uniq 済みをキャッシュ
         lastSuggestKeyRef.current = key;
         setSuggestions(out);
       } catch (err) {
@@ -341,6 +367,11 @@ export default function Result() {
     setApiError(null);
     setIsSuggestLoading(false);
 
+    // ★確定した表記で「次回は必ず1件だけ」に固定（復活対策）
+    const fixed = String(name).trim();
+    suggestCacheRef.current.set(fixed, [fixed]);
+    lastSuggestKeyRef.current = fixed;
+
     setTimeout(() => {
       suppressSuggestRef.current = false;
     }, 0);
@@ -369,7 +400,10 @@ export default function Result() {
 
     setApiError(null);
     setSuggestions([]);
-    const canonical = (suggestions && suggestions.length > 0) ? suggestions[0] : raw;
+    const rawInput = (searchQuery ?? "").trim();
+    const candidates = uniqByCompanyKey(suggestions);
+    const canonical = candidates.length > 0 ? String(candidates[0]).trim() : rawInput;
+
     await fetchCompanyReport(canonical);
 
   };
