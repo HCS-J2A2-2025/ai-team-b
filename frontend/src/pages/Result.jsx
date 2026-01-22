@@ -268,7 +268,7 @@ const uniqByCompanyKey = (arr) => {
     }
 
     const cached = suggestCacheRef.current.get(key);
-    if (Array.isArray(cached)) {
+    if (Array.isArray(cached) && cached.length > 0) {   // ★0件はヒット扱いにしない
       setSuggestions(uniqByCompanyKey(cached));
       setIsSuggestLoading(false);
       lastSuggestKeyRef.current = key;
@@ -306,7 +306,11 @@ const uniqByCompanyKey = (arr) => {
         const list = data?.candidates || data?.suggestions || [];
         const raw = Array.isArray(list) ? list : [];
         const out = uniqByCompanyKey(raw);
-        suggestCacheRef.current.set(key, out); // ★必ず uniq 済みをキャッシュ
+        if (out.length > 0) {
+          suggestCacheRef.current.set(key, out);
+        } else {
+          suggestCacheRef.current.delete(key); // ★過去の0件も消す
+        } // ★必ず uniq 済みをキャッシュ
         lastSuggestKeyRef.current = key;
         setSuggestions(out);
       } catch (err) {
@@ -369,8 +373,10 @@ const uniqByCompanyKey = (arr) => {
 
     // ★確定した表記で「次回は必ず1件だけ」に固定（復活対策）
     const fixed = String(name).trim();
-    suggestCacheRef.current.set(fixed, [fixed]);
-    lastSuggestKeyRef.current = fixed;
+    // 固定キャッシュはしない（再検索阻害になる）
+    // suggestCacheRef.current.set(fixed, [fixed]);
+    lastSuggestKeyRef.current = ""; // ★これも空にしておくと確実
+
 
     setTimeout(() => {
       suppressSuggestRef.current = false;
@@ -401,10 +407,26 @@ const uniqByCompanyKey = (arr) => {
     setApiError(null);
     setSuggestions([]);
     const rawInput = (searchQuery ?? "").trim();
-    const candidates = uniqByCompanyKey(suggestions);
-    const canonical = candidates.length > 0 ? String(candidates[0]).trim() : rawInput;
+    let canonical = rawInput;
+
+    if (rawInput && uniqByCompanyKey(suggestions).length === 0) {
+      try {
+        const sres = await fetch(`${API_BASE}/api/company/suggest`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: rawInput }),
+        });
+        const sjson = await sres.json().catch(() => ({}));
+        const fetched = uniqByCompanyKey(Array.isArray(sjson?.candidates) ? sjson.candidates : []);
+        if (fetched.length > 0) canonical = String(fetched[0]).trim();
+      } catch {}
+    } else {
+      const candidates = uniqByCompanyKey(suggestions);
+      if (candidates.length > 0) canonical = String(candidates[0]).trim();
+    }
 
     await fetchCompanyReport(canonical);
+
 
   };
 

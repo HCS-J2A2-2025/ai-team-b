@@ -121,47 +121,54 @@ const handleSubmit = async (e) => {
 
   setIsSubmitting(true);
   setApiError(null);
-    try {
+
+  try {
     const cached =
-        lastSuggestKeyRef.current === raw ? suggestions : suggestCacheRef.current.get(raw);
+      lastSuggestKeyRef.current === raw
+        ? suggestions
+        : suggestCacheRef.current.get(raw);
+
     const candidates = Array.isArray(cached) ? cached : [];
 
     if (candidates.length === 0) {
-        // ✅ suggestで「CSV上の正式名」を取って、それで遷移する
-        const sres = await fetch(`${API_BASE}/api/company/suggest`, {
+      const sres = await fetch(`${API_BASE}/api/company/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ keyword: raw }),
-        });
+      });
 
-        const sjson = await sres.json().catch(() => ({}));
-        if (!sres.ok) {
+      const sjson = await sres.json().catch(() => ({}));
+      if (!sres.ok) {
         setApiError(`入力チェックに失敗しました（HTTP ${sres.status}）`);
         return;
-        }
+      }
 
-        const fetchedRaw = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
-        const fetched = uniqByCompanyKey(fetchedRaw);
+      const fetchedRaw = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
+      const fetched = uniqByCompanyKey(fetchedRaw);
 
-        if (fetched.length === 0) {
+      if (fetched.length === 0) {
         setApiError("企業名が見つかりませんでした（候補なし）");
         return;
-        }
+      }
 
-        suggestCacheRef.current.set(raw, fetched);
-        const canonicalName = String(fetched[0]).trim();
+      // 0件はキャッシュしない（念のため）
+      suggestCacheRef.current.set(raw, fetched);
 
-        navigate("/result", { state: { companyName: canonicalName } });
-        return;
+      const canonicalName = String(fetched[0]).trim();
+      navigate("/result", { state: { companyName: canonicalName } });
+      return;
     }
 
     const canonicalName = String(candidates[0]).trim();
     navigate("/result", { state: { companyName: canonicalName } });
-    } catch (err) {
+  } catch (err) {
     setApiError("API 接続エラー：サーバーに接続できませんでした");
-    }
-
+  } finally {
+    // ★ ここが重要：候補なし/エラーでも必ず解除される
+    setIsSubmitting(false);
+  }
 };
+
 
 
 const handleLogout = () => {
@@ -258,8 +265,8 @@ if (!key) {
 }
 
 const cached = suggestCacheRef.current.get(key);
-if (Array.isArray(cached)) {
-  setSuggestions(uniqByCompanyKey(cached)); // ★復活対策
+if (Array.isArray(cached) && cached.length > 0) {
+  setSuggestions(uniqByCompanyKey(cached));
   setIsSuggestLoading(false);
   lastSuggestKeyRef.current = key;
   return;
@@ -300,7 +307,11 @@ suggestTimerRef.current = setTimeout(async () => {
     const rawList = Array.isArray(data?.candidates) ? data.candidates : [];
     const list = uniqByCompanyKey(rawList);
 
-    suggestCacheRef.current.set(key, list);   // ★必ず uniq 済みをキャッシュ
+    if (list.length > 0) {
+        suggestCacheRef.current.set(key, list);
+    } else {
+        suggestCacheRef.current.delete(key); // 過去の0件も消す
+    }   // ★必ず uniq 済みをキャッシュ
     lastSuggestKeyRef.current = key;
     setSuggestions(list);
     } catch (err) {
