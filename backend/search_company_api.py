@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional, Set
 
 import pandas as pd
 from fastapi import FastAPI
@@ -14,7 +14,6 @@ from cache_api import router as cache_router
 # =========================================================
 app = FastAPI()
 
-# ✅ 本番IPアクセスも想定するならここを増やす（例: 10.11.33.225:3000 など）
 ALLOWED_ORIGINS = [
     "http://localhost:3000",
     # "http://10.11.33.225:3000",
@@ -27,7 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# フロントは /api/cache/company を叩く前提
 app.include_router(cache_router, prefix="/api/cache", tags=["cache"])
 
 # =========================================================
@@ -44,48 +42,143 @@ _CORP_PATTERNS = [
 _CORP_RE = re.compile("|".join(_CORP_PATTERNS))
 
 def detect_corp_kind(s: str) -> str:
-    """クエリが「有限会社」指定か「株式会社」指定かを判定。"""
     s = s or ""
     if re.search(r"(有限会社|㈲|\(有\)|（有）)", s):
-        return "YK"  # 有限会社
+        return "YK"
     if re.search(r"(株式会社|㈱|\(株\)|（株）)", s):
-        return "KK"  # 株式会社
-    return ""       # 指定なし
+        return "KK"
+    return ""
 
 def normalize_company_key(name: str) -> str:
-    """同一判定用キー（法人格差は吸収）。"""
+    """会社名の同一判定用キー（法人格差は吸収）"""
     if not name:
         return ""
     s = str(name)
 
-    # 空白除去
     s = s.strip().replace("　", "")
     s = re.sub(r"\s+", "", s)
 
-    # 全角英数→半角
     trans = str.maketrans(
         "０１２３４５６７８９ＡＢＣＤＥＦＧＨＩＪＫＬＭＮＯＰＱＲＳＴＵＶＷＸＹＺａｂｃｄｅｆｇｈｉｊｋｌｍｎｏｐｑｒｓｔｕｖｗｘｙｚ",
         "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz",
     )
     s = s.translate(trans)
 
-    # 記号ゆれ統一
     s = s.replace("−", "-").replace("ー", "-").replace("―", "-").replace("‐", "-")
     s = s.replace("･", "・")
-
-    # かっこ類除去
     s = re.sub(r"[()（）【】\[\]{}<>＜＞「」『』]", "", s)
 
-    # 法人格を除去
     s = _CORP_RE.sub("", s)
-
-    # 中黒削除
     s = s.replace("・", "")
 
-    # 小文字
-    s = s.lower()
+    return s.lower()
 
-    return s
+# =========================================================
+# CSV load helper
+# =========================================================
+def read_csv_safely(path: str, encoding_candidates: List[str], **kwargs) -> pd.DataFrame:
+    last_err: Optional[Exception] = None
+    for enc in encoding_candidates:
+        try:
+            return pd.read_csv(path, encoding=enc, **kwargs)
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"Failed to read {path} encodings={encoding_candidates}: {last_err}")
+
+# =========================================================
+# ✅ 説明会だけ企業ブロック（これ1個だけ）
+#   - ここで作った is_blocked_company() を
+#     Suggest / Search / Validate で共通利用する
+# =========================================================
+REPORT_PATH = "data/report_t_all.csv"  # ★実データのパスに合わせる
+REPORT_ENCODINGS = ["utf-8-sig", "utf-8", "cp932", "shift_jis", "shift_jisx0213"]
+
+EXPLAIN_WORDS = ["説明会", "会社説明会", "セミナー", "合同説明会", "企業説明", "ガイダンス"]
+
+def _is_explain_stage(s: str) -> bool:
+    t = str(s or "").strip()
+    return any(w in t for w in EXPLAIN_WORDS)
+
+def _detect_company_col(df: pd.DataFrame) -> Optional[str]:
+    for c in ["企業名", "company_name", "会社名"]:
+        if c in df.columns:
+            return c
+    return None
+
+def _detect_stage_col(df: pd.DataFrame) -> Optional[str]:
+    # “説明会” が入りやすい列を優先順で探す（必要なら追加）
+    candidates = [
+        "選考段階",
+        "イベント名",
+        "イベント種別",
+        "種別",
+        "区分",
+        "ステータス",
+        "event_kind",
+        "stage",
+        "type",
+    ]
+    for c in candidates:
+        if c in df.columns:
+            return c
+    return None
+
+def _load_report_df_for_explain_block() -> Optional[pd.DataFrame]:
+    """
+    1) load_report_df_normalized が存在すればそれを使う
+    2) 無ければ REPORT_PATH を read_csv_safely で読む
+    """
+    # 1) company_summary_batch 側ローダがある場合
+    try:
+        # 関数が存在する環境なら使える
+        if "load_report_df_normalized" in globals() and callable(globals()["load_report_df_normalized"]):
+            return globals()["load_report_df_normalized"]()
+    except Exception as e:
+        print("[WARN] explain-only: load_report_df_normalized failed:", e)
+
+    # 2) 直接CSVから読む
+    try:
+        return read_csv_safely(REPORT_PATH, REPORT_ENCODINGS)
+    except Exception as e:
+        print("[WARN] explain-only: report csv read failed:", e)
+        return None
+
+def build_explain_only_keys_from_report_df(df: pd.DataFrame) -> Set[str]:
+    company_col = _detect_company_col(df)
+    stage_col = _detect_stage_col(df)
+
+    if not company_col or not stage_col:
+        print("[WARN] explain-only: missing cols -> company_col=", company_col, "stage_col=", stage_col)
+        return set()
+
+    tmp = df[[company_col, stage_col]].copy()
+    tmp[company_col] = tmp[company_col].astype(str).fillna("")
+    tmp[stage_col] = tmp[stage_col].astype(str).fillna("")
+
+    tmp["key"] = tmp[company_col].map(normalize_company_key)
+    tmp = tmp[tmp["key"] != ""]
+
+    tmp["is_explain"] = tmp[stage_col].map(_is_explain_stage)
+
+    # 「全レコードが説明会」 = 説明会だけ企業
+    g = tmp.groupby("key")["is_explain"]
+    return set(g.apply(lambda s: (len(s) > 0) and bool(s.all())).index)
+
+def load_explain_only_keys() -> Set[str]:
+    df = _load_report_df_for_explain_block()
+    if df is None or df.empty:
+        print("[WARN] explain-only: disabled (no report df)")
+        return set()
+
+    keys = build_explain_only_keys_from_report_df(df)
+    print("[INFO] EXPLAIN_ONLY_KEYS size:", len(keys))
+    return keys
+
+EXPLAIN_ONLY_KEYS: Set[str] = load_explain_only_keys()
+
+def is_blocked_company(name: str) -> bool:
+    key = normalize_company_key(name)
+    return bool(key) and (key in EXPLAIN_ONLY_KEYS)
 
 # =========================================================
 # Address helpers
@@ -120,53 +213,30 @@ def core_addr_tokens(addr: str) -> Dict[str, object]:
     return {"pref": pref, "city": city, "nums": nums, "norm": a}
 
 # =========================================================
-# CSV load (安全に)
+# Load corp DB (company/address)
 # =========================================================
-def read_csv_safely(path: str, encoding_candidates: List[str], **kwargs) -> pd.DataFrame:
-    last_err: Optional[Exception] = None
-    for enc in encoding_candidates:
-        try:
-            return pd.read_csv(path, encoding=enc, **kwargs)
-        except Exception as e:
-            last_err = e
-    raise RuntimeError(f"Failed to read {path} with encodings={encoding_candidates}: {last_err}")
-
-# ⚠ usecols=[7,11] は「列の意味が確定してる時だけ」おすすめ
 target = read_csv_safely(
     "data/01_hokkaido_all_20251226.csv",
     ["cp932", "shift_jis", "shift_jisx0213", "utf-8-sig", "utf-8"],
     usecols=[7, 11],
 )
-
-# subject は現状使ってないなら消してOK（読み込みエラーの原因になりがち）
-subject = read_csv_safely(
-    "data/data-1768790126893.csv",
-    ["utf-8-sig", "utf-8", "cp932"],
-    usecols=["company_name"],
-)
-
 print("target columns:", target.columns.tolist())
 
 # =========================================================
-# Build name_index (有限会社が消えない “完璧版”)
-#   - 1キー=1社（重複は出さない）
-#   - ただし aliases に「株式会社/有限会社の両方の正式名」を保持
-#   - 表示名は query の法人格に合わせて選ぶ
+# Build name_index
 # =========================================================
 def detect_name_col(df: pd.DataFrame) -> str:
     candidates = ["company_name", "企業名", "会社名", "名称", "商号", "法人名", "name"]
-    cols = list(df.columns)
     for c in candidates:
-        if c in cols:
+        if c in df.columns:
             return c
-    return cols[0]  # 最後の保険
+    return df.columns[0]
 
 NAME_COL = detect_name_col(target)
 print("Detected NAME_COL:", NAME_COL)
 
 def build_name_index(df: pd.DataFrame, name_col: str) -> Dict[str, List[Dict]]:
     idx: Dict[str, List[Dict]] = {}
-
     for _, row in df.iterrows():
         raw_name = str(row.get(name_col, "") or "")
         key = normalize_company_key(raw_name)
@@ -175,55 +245,39 @@ def build_name_index(df: pd.DataFrame, name_col: str) -> Dict[str, List[Dict]]:
 
         if key not in idx:
             cand = row.to_dict()
-            cand["name"] = raw_name                 # 代表名（後で更新）
-            cand["aliases"] = {raw_name}            # ★重要：別法人格も保持
+            cand["name"] = raw_name
+            cand["aliases"] = {raw_name}
             idx[key] = [cand]
         else:
             cur = idx[key][0]
             cur.setdefault("aliases", set()).add(raw_name)
-
-            # ✅ 代表名の選び方：
-            # 「株式会社優先」をやめる（これが有限会社が消える原因）
-            # → 情報量が多い（長い）方を代表名にする
             cur_name = str(cur.get("name", "") or "")
             if len(raw_name) > len(cur_name):
                 cur["name"] = raw_name
-
-            # 空なら埋める（任意）
-            for k in ["corp_number", "postal_code", "prefecture", "city", "street"]:
-                if not cur.get(k) and row.get(k):
-                    cur[k] = row.get(k)
-
     return idx
 
-name_index = build_name_index(target, name_col=NAME_COL)
+name_index = build_name_index(target, NAME_COL)
 print("name_index size:", len(name_index))
 
 def choose_display_name(query_name: str, cand: Dict) -> str:
-    """クエリの法人格に合わせて aliases から表示名を選ぶ。"""
     aliases = cand.get("aliases") or set()
     if isinstance(aliases, list):
         aliases = set(aliases)
 
     kind = detect_corp_kind(query_name)
-
     if kind == "YK":
-        # 有限会社を優先して返す
         for a in aliases:
             if re.search(r"(有限会社|㈲|\(有\)|（有）)", a):
                 return a
-
     if kind == "KK":
-        # 株式会社を優先して返す
         for a in aliases:
             if re.search(r"(株式会社|㈱|\(株\)|（株）)", a):
                 return a
 
-    # 指定なし or 見つからない：代表名
     return str(cand.get("name") or query_name)
 
 # =========================================================
-# Match rules / scoring
+# Match rules / scoring（ここから先は今のままでOK）
 # =========================================================
 def judge_match(log_company: str, log_addr: str, cand: Dict) -> Tuple[str, Dict]:
     reason = {"rules_hit": []}
@@ -237,18 +291,15 @@ def judge_match(log_company: str, log_addr: str, cand: Dict) -> Tuple[str, Dict]
     street = str(cand.get("street", "") or "")
     street_n = norm_addr(street)
 
-    # A: 郵便番号7桁一致
     if lp and cp and lp == cp:
         reason["rules_hit"].append("A:postal_exact")
         return "match", reason
 
-    # B: pref+city+street が含まれる
     if pref and city and street_n:
         if (pref in la["norm"]) and (city in la["norm"]) and (street_n in la["norm"]):
             reason["rules_hit"].append("B:pref_city_street_contains")
             return "match", reason
 
-    # C: A,Bで見つからなかった場合のみ
     if pref and city and street_n:
         nums = re.findall(r"\d+", street_n)
         hit = 0
@@ -259,100 +310,13 @@ def judge_match(log_company: str, log_addr: str, cand: Dict) -> Tuple[str, Dict]
             reason["rules_hit"].append(f"C:nums_hit_{hit}_with_pref_city")
             return "match", reason
 
-    # D: pref+city
     if pref and city and (pref in la["norm"]) and (city in la["norm"]):
         reason["rules_hit"].append("D:pref_city")
         return "maybe", reason
 
-    # E: 郵便番号先頭3桁 + city
     if lp and cp and lp[:3] == cp[:3] and city and (city in la["norm"]):
         reason["rules_hit"].append("E:postal_prefix3_plus_city")
         return "maybe", reason
 
     reason["rules_hit"].append("Z:no_rules")
     return "no", reason
-
-def score_candidate(log_addr: str, query_name: str, cand: Dict) -> int:
-    verdict, reason = judge_match(query_name, log_addr, cand)
-
-    if verdict == "match":
-        if any(r.startswith("A:") for r in reason["rules_hit"]):
-            return 1000
-        if any(r.startswith("B:") for r in reason["rules_hit"]):
-            return 900
-        if any(r.startswith("C:") for r in reason["rules_hit"]):
-            return 800
-        return 700
-
-    if verdict == "maybe":
-        if any(r.startswith("D:") for r in reason["rules_hit"]):
-            return 200
-        if any(r.startswith("E:") for r in reason["rules_hit"]):
-            return 150
-        return 100
-
-    return 0
-
-def _is_ab_confirm(reason: Dict) -> bool:
-    hits = reason.get("rules_hit", [])
-    return any(h.startswith("A:") or h.startswith("B:") for h in hits)
-
-# =========================================================
-# Suggest (有限会社が “表示される”)
-#   - A/B確定なら1社だけ
-#   - official_name は query の法人格に合わせて表示名を選ぶ
-# =========================================================
-def suggest_companies(query_name: str, log_addr: str, name_index: dict, topk: int = 8):
-    key = normalize_company_key(query_name)
-    cands = name_index.get(key, [])
-    if not cands:
-        return []
-
-    # A/B 確定なら1件のみ返す
-    for c in cands:
-        verdict, reason = judge_match(query_name, log_addr, c)
-        if verdict == "match" and _is_ab_confirm(reason):
-            return [{
-                "score": 9999,
-                "corp_number": c.get("corp_number"),
-                "official_name": choose_display_name(query_name, c),  # ✅ここが肝
-                "postal_code": c.get("postal_code"),
-                "prefecture": c.get("prefecture"),
-                "city": c.get("city"),
-                "street": c.get("street"),
-                "verdict": verdict,
-                "rules_hit": reason["rules_hit"],
-            }]
-
-    ranked = []
-    for c in cands:
-        ranked.append((score_candidate(log_addr, query_name, c), c))
-    ranked.sort(key=lambda x: x[0], reverse=True)
-
-    out = []
-    for sc, c in ranked[:topk]:
-        out.append({
-            "score": sc,
-            "corp_number": c.get("corp_number"),
-            "official_name": choose_display_name(query_name, c),  # ✅ここも肝
-            "postal_code": c.get("postal_code"),
-            "prefecture": c.get("prefecture"),
-            "city": c.get("city"),
-            "street": c.get("street"),
-        })
-    return out
-
-# =========================================================
-# Debug routes
-# =========================================================
-@app.get("/__routes")
-def __routes():
-    return sorted([getattr(r, "path", "") for r in app.routes])
-
-@app.get("/__debug/sample_names")
-def __debug_sample_names(n: int = 30):
-    # 有限会社が index に入ってるか即確認できる
-    col = target[NAME_COL].astype(str)
-    yk = col[col.str.contains("有限会社", na=False)].head(n).to_list()
-    kk = col[col.str.contains("株式会社", na=False)].head(n).to_list()
-    return {"NAME_COL": NAME_COL, "yk_sample": yk, "kk_sample": kk}

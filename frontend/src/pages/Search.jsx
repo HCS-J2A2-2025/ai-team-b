@@ -114,6 +114,7 @@ return () => document.removeEventListener("mousedown", onDocMouseDown);
 }, []);
 
 // 検索ボタン押したときに /result へ遷移 + 会社名を渡す
+// 検索ボタン押したときに /result へ遷移 + 会社名を渡す
 const handleSubmit = async (e) => {
   e.preventDefault();
   const raw = company.trim();
@@ -123,14 +124,22 @@ const handleSubmit = async (e) => {
   setApiError(null);
 
   try {
+    let canonicalName = raw;
+
+    // 1) まず手元の候補（直前入力 or cache）を確認
     const cached =
       lastSuggestKeyRef.current === raw
         ? suggestions
         : suggestCacheRef.current.get(raw);
 
-    const candidates = Array.isArray(cached) ? cached : [];
+    const candidates = Array.isArray(cached) ? uniqByCompanyKey(cached) : [];
 
-    if (candidates.length === 0) {
+    if (candidates.length > 0) {
+      canonicalName = String(candidates[0]).trim();
+    }
+
+    // 2) 候補が無いならサーバーに取りに行く（Result.jsx と同じ）
+    try {
       const sres = await fetch(`${API_BASE}/api/company/suggest`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -138,36 +147,44 @@ const handleSubmit = async (e) => {
       });
 
       const sjson = await sres.json().catch(() => ({}));
-      if (!sres.ok) {
-        setApiError(`入力チェックに失敗しました（HTTP ${sres.status}）`);
-        return;
+
+      // suggest API が落ちても「検索は進める」
+      if (sres.ok) {
+        const fetchedRaw = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
+        const fetched = uniqByCompanyKey(fetchedRaw);
+
+        if (fetched.length > 0) {
+          canonicalName = String(fetched[0]).trim();
+          suggestCacheRef.current.set(raw, fetched); // 0件は入れない
+        }
       }
-
-      const fetchedRaw = Array.isArray(sjson?.candidates) ? sjson.candidates : [];
-      const fetched = uniqByCompanyKey(fetchedRaw);
-
-      if (fetched.length === 0) {
-        setApiError("企業名が見つかりませんでした（候補なし）");
-        return;
-      }
-
-      // 0件はキャッシュしない（念のため）
-      suggestCacheRef.current.set(raw, fetched);
-
-      const canonicalName = String(fetched[0]).trim();
-      navigate("/result", { state: { companyName: canonicalName } });
-      return;
+    } catch {
+      // ここも握りつぶしてOK（検索は進める）
     }
 
-    const canonicalName = String(candidates[0]).trim();
-    navigate("/result", { state: { companyName: canonicalName } });
+    // 3) validate でブロック判定（SINGLE_COMPANY 等は遷移しない）
+    try {
+      const vres = await fetch(`${API_BASE}/api/company/validate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: canonicalName }),
+      });
+      const vjson = await vres.json().catch(() => ({}));
+      if (!vres.ok || vjson?.ok === false) {
+        setApiError(vjson?.error || "検索対象外の企業です");
+        return;
+      }
+      navigate("/result", { state: { companyName: canonicalName } });
+    } catch {
+      setApiError("API 接続エラー：サーバーに接続できませんでした");
+    }
   } catch (err) {
     setApiError("API 接続エラー：サーバーに接続できませんでした");
   } finally {
-    // ★ ここが重要：候補なし/エラーでも必ず解除される
     setIsSubmitting(false);
   }
 };
+
 
 
 

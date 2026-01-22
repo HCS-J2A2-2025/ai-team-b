@@ -121,7 +121,7 @@ def _is_symbol_only(s: str) -> bool:
     return not re.search(r"[A-Za-z0-9ぁ-んァ-ン一-龥]", s or "")
 
 
-SUGGEST_EVENT_KINDS = {"EXAM_INTERVIEW", "EXAM_APTITUDE"}
+ALLOWED_EVENT_KINDS = {"EXAM_INTERVIEW"}
 _suggest_names_cache: list[str] = []
 _suggest_names_cache_mtime_ns: int | None = None
 
@@ -132,6 +132,26 @@ def _get_source_csv_mtime_ns() -> int | None:
         return p.stat().st_mtime_ns if p.exists() else None
     except Exception:
         return None
+
+
+def _filter_out_blocked_event_kinds(df: pd.DataFrame) -> pd.DataFrame:
+    col_event = "イベント種別" if "イベント種別" in df.columns else "event_kind"
+    if col_event not in df.columns:
+        return df
+    event_kind = df[col_event].astype(str).str.strip().str.upper()
+    return df[event_kind.isin(ALLOWED_EVENT_KINDS)].copy()
+
+
+def _company_exists_in_df(df: pd.DataFrame, keyword: str) -> bool:
+    col_company = "企業名"
+    if col_company not in df.columns:
+        return False
+    norm_input = _normalize_company_name(keyword)
+    if not norm_input:
+        return False
+    tmp = df.copy()
+    tmp["__norm_name"] = tmp[col_company].astype(str).apply(_normalize_company_name)
+    return not tmp[tmp["__norm_name"] == norm_input].empty
 
 
 
@@ -156,8 +176,7 @@ def _get_company_names_from_report() -> list[str]:
 
     col_event = "イベント種別" if "イベント種別" in df.columns else "event_kind"
     if col_event in df.columns:
-        event_kind = df[col_event].astype(str).str.strip().str.upper()
-        df = df[event_kind.isin(SUGGEST_EVENT_KINDS)]
+        df = _filter_out_blocked_event_kinds(df)
         if df.empty:
             _suggest_names_cache = []
             _suggest_names_cache_mtime_ns = mtime_ns
@@ -213,6 +232,14 @@ def _create_report(name: str, student_no: str | None = None):
     # =========================================================
     cached = _try_get_company_from_json_cache(keyword)
     if cached is not None:
+        try:
+            df_check = load_report_df_normalized()
+            df_check = _filter_out_blocked_event_kinds(df_check)
+            if not _company_exists_in_df(df_check, keyword):
+                return None, {"error": "データに存在しません（SINGLE_COMPANYは対象外）"}
+        except Exception as e:
+            return None, {"error": f"report_t_all.csv の読み込みに失敗しました: {e}"}
+
         company_name = str(cached.get("company") or keyword).strip()
         report = str(cached.get("report") or "").strip()
 
@@ -262,6 +289,10 @@ def _create_report(name: str, student_no: str | None = None):
     col_company = "企業名"
     if col_company not in df.columns:
         return None, {"error": f"report_t_all.csv に {col_company} 列がありません"}
+
+    df = _filter_out_blocked_event_kinds(df)
+    if df.empty:
+        return None, {"error": "検索対象データがありません（SINGLE_COMPANYは対象外）"}
 
     # 正規化（完全一致）
     norm_input = _normalize_company_name(keyword)
@@ -557,6 +588,10 @@ def post_company_validate(req: CompanyValidateRequest):
     col_company = "企業名"
     if col_company not in df.columns:
         return {"ok": False, "error": f"report_t_all.csv に {col_company} 列がありません"}
+
+    df = _filter_out_blocked_event_kinds(df)
+    if df.empty:
+        return {"ok": False, "error": "検索対象データがありません（SINGLE_COMPANYは対象外）"}
 
     norm_input = _normalize_company_name(keyword)
 

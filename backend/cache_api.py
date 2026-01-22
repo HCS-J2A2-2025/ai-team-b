@@ -1,6 +1,8 @@
 # cache_api.py
 import json
 import re
+import os
+DISABLE_NORM_INDEX = os.getenv("DISABLE_NORM_INDEX", "0") == "1"
 import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List, Tuple, Optional
@@ -181,6 +183,10 @@ _last_mtime_ns: Optional[int] = None     # file mtime to detect update
 def _ensure_norm_index(comps: Dict[str, Any]) -> None:
     global _norm_index, _last_mtime_ns
 
+    if DISABLE_NORM_INDEX:
+        _norm_index = {}
+        _last_mtime_ns = None
+
     try:
         mtime_ns = ALL_CACHE_PATH.stat().st_mtime_ns
     except Exception:
@@ -310,6 +316,7 @@ def post_company_cache(payload: Dict[str, Any]):
     # ✅ 404 を返さない：キャッシュミスは「正常系」
     out: Dict[str, Any] = {
         "found": False,
+        "no_cache": True,
         "detail": "company not found",
         "requested": raw,
         "normalized": nkey,
