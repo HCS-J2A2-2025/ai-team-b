@@ -270,7 +270,11 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 9999;
+  /*
+   * Raise the result overlay above suggestion lists and other content.
+   * A high z-index (100000) ensures the loading dialog remains on top.
+   */
+  z-index: 100000;
 }
 
 .result-loading-box {

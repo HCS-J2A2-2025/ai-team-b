@@ -6,7 +6,7 @@ import "../css/Search.css";
 
 export default function Result() {
   const location = useLocation();
-
+  const companyName = (location.state?.companyName ?? "").trim();
   const initialCompanyName = (location.state?.companyName ?? "").trim();
   const [searchQuery, setSearchQuery] = useState(initialCompanyName);
   const [fixedCompanyName, setFixedCompanyName] = useState(initialCompanyName);
@@ -37,6 +37,9 @@ export default function Result() {
   const suggestAbortRef = useRef(null);
   const suppressSuggestRef = useRef(false);
   const suggestSeqRef = useRef(0);
+  const suggestTimerRef = useRef(null);
+  const lastSuggestKeyRef = useRef("");
+  const suggestCacheRef = useRef(new Map());
   const composingRef = useRef(false);
   const pendingSelectRef = useRef(null);
   const inputRef = useRef(null);
@@ -58,13 +61,26 @@ export default function Result() {
         setSuggestions([]);
         setIsSuggestLoading(false);
         if (suggestAbortRef.current) suggestAbortRef.current.abort();
+        if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
         suggestSeqRef.current++;
       }
     };
 
     document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
+    return () => {
+      document.removeEventListener("mousedown", onDocMouseDown);
+      if (suggestAbortRef.current) suggestAbortRef.current.abort();
+      if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    };
   }, []);
+
+  // オーバーレイ（AIレポート取得中）表示中はサジェストを非表示にする
+  // showLoading が true の間は候補リストがモーダルより前に出ないように
+  useEffect(() => {
+    if (showLoading) {
+      setSuggestions([]);
+    }
+  }, [showLoading]);
 
   const getReportId = (record, idx) =>
     record?.public_id ||
@@ -107,45 +123,12 @@ export default function Result() {
     // =====================================================
     // ✅ 1) まず JSONキャッシュ（POST）を見に行く
     // =====================================================
-    try {
-      const cacheRes = await fetch("http://localhost:8000/api/cache/company", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name }),
-      });
 
-      const cacheJson = await cacheRes.json().catch(() => null);
-
-      let cacheData = null;
-
-      if (cacheRes.ok && cacheJson && typeof cacheJson === "object") {
-        if (Array.isArray(cacheJson.records)) {
-          cacheData = cacheJson;
-        } else if (cacheJson.company && Array.isArray(cacheJson.company.records)) {
-          cacheData = cacheJson.company;
-        }
-      }
-
-      if (
-        cacheRes.ok &&
-        cacheData &&
-        Array.isArray(cacheData.records) &&
-        cacheData.records.length > 0
-      ) {
-        setFixedCompanyName(name);
-        setReport(typeof cacheData.report === "string" ? cacheData.report : "");
-        setRecords(cacheData.records.slice(-10));
-        setApiError(null);
-        return; // ✅ キャッシュ命中 → ここで終了
-      }
-    } catch (e) {
-      console.warn("cache fetch failed, fallback to AI:", e);
-    }
 
     // =====================================================
     // ✅ 2) キャッシュが無ければAI生成（POST→request_id→result）
     // =====================================================
-    const res = await fetch("http://localhost:8000/api/company/report", {
+    const res = await fetch("/api/company/report", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
@@ -165,7 +148,7 @@ export default function Result() {
       return;
     }
 
-    const res2 = await fetch("http://localhost:8000/api/company/report/result", {
+    const res2 = await fetch("/api/company/report/result", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ request_id: requestId }),
@@ -209,7 +192,7 @@ export default function Result() {
     setDetailErrorMap((p) => ({ ...p, [reportId]: "" }));
 
     try {
-      const res = await fetch("http://localhost:8000/api/interview/detail", {
+      const res = await fetch("/api/interview/detail", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ report_id: reportId }),
@@ -252,45 +235,61 @@ export default function Result() {
     const key = (keyword ?? "").trim();
     if (!key) {
       if (suggestAbortRef.current) suggestAbortRef.current.abort();
+      if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
       setSuggestions([]);
       setIsSuggestLoading(false);
       return;
     }
 
-    const seq = ++suggestSeqRef.current;
+    const cached = suggestCacheRef.current.get(key);
+    if (Array.isArray(cached)) {
+      setSuggestions(cached);
+      setIsSuggestLoading(false);
+      lastSuggestKeyRef.current = key;
+      return;
+    }
 
+    if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
     if (suggestAbortRef.current) suggestAbortRef.current.abort();
-    const controller = new AbortController();
-    suggestAbortRef.current = controller;
-
     setIsSuggestLoading(true);
 
-    try {
-      const res = await fetch("http://localhost:8000/api/company/suggest", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keyword }),
-        signal: controller.signal,
-      });
+    suggestTimerRef.current = setTimeout(async () => {
+      const seq = ++suggestSeqRef.current;
 
-      const data = await res.json().catch(() => ({}));
-      if (seq !== suggestSeqRef.current) return;
-      if (suppressSuggestRef.current) return;
+      if (suggestAbortRef.current) suggestAbortRef.current.abort();
+      const controller = new AbortController();
+      suggestAbortRef.current = controller;
 
-      if (!res.ok) {
+      try {
+        const res = await fetch("/api/company/suggest", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ keyword: key }),
+          signal: controller.signal,
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (seq !== suggestSeqRef.current) return;
+        if (suppressSuggestRef.current) return;
+
+        if (!res.ok) {
+          setSuggestions([]);
+          return;
+        }
+
+        const list = data?.candidates || data?.suggestions || [];
+        const out = Array.isArray(list) ? list : [];
+        suggestCacheRef.current.set(key, out);
+        lastSuggestKeyRef.current = key;
+        setSuggestions(out);
+      } catch (err) {
+        if (err?.name !== "AbortError") console.error("候補取得エラー:", err);
+        if (seq !== suggestSeqRef.current) return;
         setSuggestions([]);
-        return;
+      } finally {
+        if (seq === suggestSeqRef.current) setIsSuggestLoading(false);
       }
-
-      const list = data?.candidates || data?.suggestions || [];
-      setSuggestions(Array.isArray(list) ? list : []);
-    } catch (err) {
-      if (err?.name !== "AbortError") console.error("候補取得エラー:", err);
-      if (seq !== suggestSeqRef.current) return;
-      setSuggestions([]);
-    } finally {
-      if (seq === suggestSeqRef.current) setIsSuggestLoading(false);
-    }
+    }, 250);
   };
 
   // 「㈱」を入力欄のカーソル位置に挿入（重複は避ける）
@@ -369,7 +368,9 @@ export default function Result() {
 
     setApiError(null);
     setSuggestions([]);
-    await fetchCompanyReport(raw);
+    const canonical = (suggestions && suggestions.length > 0) ? suggestions[0] : raw;
+    await fetchCompanyReport(canonical);
+
   };
 
   useEffect(() => {
