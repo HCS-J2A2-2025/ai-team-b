@@ -66,14 +66,17 @@ body,
 }
 
 .search-row .search-wrapper {
-  flex: 1;
+  flex: 1 1 auto; 
   /* 入力側を伸ばす */
   width: auto;
   /* 既存の width を上書き */
   min-width: 360px;
+  width: auto;
 }
 
 .search-row .search-button {
+  flex: 0 0 auto;
+  width: auto;
   margin-top: 0;
   /* 既存の margin-top:8px を打ち消す */
   align-self: flex-start;
@@ -90,10 +93,13 @@ body,
 
   .search-row .search-wrapper {
     min-width: 0;
+    width: 100%;
   }
 
   .search-row .search-button {
     width: 100%;
+    align-self: stretch;
+    margin-top: 0; 
   }
 }
 /* バー＋予測リストの共通幅をここで決める */
@@ -398,8 +404,8 @@ body,
   }
 
   .search-button {
-    width: 72vw;
-    max-width: 320px;
+    width: 100%;
+    max-width: none;
     font-size: 16px;
     letter-spacing: 0.3em;
   }
@@ -411,7 +417,7 @@ body,
   }
 
   .search-button {
-    width: 80vw;
+    width: 100%;
   }
 }
 
