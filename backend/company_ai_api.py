@@ -2,6 +2,7 @@
 import time
 import uuid
 import re
+import pandas as pd
 from pathlib import Path
 
 import pandas as pd
@@ -11,8 +12,11 @@ from cache_api import router as cache_router
 from fastapi import FastAPI, Query, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-
 from analysis import build_student_analysis, suggest_student_ids
+from company_summary_batch import generate_student_ai_summary
+# 既存ルーター
+from csv_api import router as csv_router
+#from followup_api import router as followup_router
 
 # =========================
 # AI switches (NO .env)
@@ -20,18 +24,17 @@ from analysis import build_student_analysis, suggest_student_ids
 USE_LEFT_AI = True     # ← 左の企業AI要約を使うなら True
 USE_RIGHT_AI = True    # ← 右の面接カードをAIで作るなら True
 
-# 既存ルーター
-from csv_api import router as csv_router
-# from followup_api import router as followup_router
 
 # company_summary_batch を「モジュールとして」import してスイッチ反映する
 import company_summary_batch as csb
 
 # 必要関数を取り込む（csb. を使ってもOK）
+# report_t_all.csv の列名ゆれ/BOM/空白を吸収する
 from company_summary_batch import (
     generate_detailed_report,
     build_interview_records_for_company,
     get_latest_interview_texts,
+    get_company_names_cached,
     load_report_df as load_report_df_normalized,
     summarize_company,
     summarize_company_with_error,
@@ -54,14 +57,15 @@ app.include_router(csv_router)
 # app.include_router(followup_router)
 
 # CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-    ],
+app.add_middleware( CORSMiddleware, allow_origins=[
+    "http://10.11.33.225:8000",
+    "http://10.11.33.225:3000",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+],
+
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

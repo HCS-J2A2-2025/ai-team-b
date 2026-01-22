@@ -26,7 +26,6 @@ PUBLIC_ID_SECRET = os.getenv("PUBLIC_ID_SECRET", "dev-secret-change-me")
 # =========================
 ENABLE_LEFT_AI = True
 ENABLE_RIGHT_AI = True
-ENABLE_ROUND_AI = True  # 最終面接の判定にのみ使用
 
 # ====== 設定 ======
 BASE_DIR = os.path.dirname(__file__)
@@ -38,6 +37,7 @@ DISPLAY_RECORD_LIMIT = 10  # 右側に出す最大件数（= 最新10人分）
 
 EVENT_KIND_INTERVIEW = "EXAM_INTERVIEW"
 EVENT_KIND_APTITUDE = "EXAM_APTITUDE"
+FINAL_RESULT_KINDS = {"RESCIND_OFFER", "OFFERED"}
 
 # ====== 質問に出したくない話題（合否・内定など） ======
 QUESTION_NG_WORDS = [
@@ -64,7 +64,22 @@ CONTENT_TAG_RULES = {
 # ============================================================
 # 共通：CSV読み込み（BOM / 空白 / 表記揺れの吸収）
 # ============================================================
+_REPORT_DF_CACHE = None
+_REPORT_DF_MTIME = None
+_REPORT_NAMES_CACHE = None
+_REPORT_NAMES_MTIME = None
+
+
+def _get_report_mtime():
+    return os.path.getmtime(INPUT_CSV)
+
+
 def load_report_df():
+    global _REPORT_DF_CACHE, _REPORT_DF_MTIME, _REPORT_NAMES_CACHE, _REPORT_NAMES_MTIME
+    mtime = _get_report_mtime()
+    if _REPORT_DF_CACHE is not None and _REPORT_DF_MTIME == mtime:
+        return _REPORT_DF_CACHE
+
     df = pd.read_csv(INPUT_CSV, encoding="utf-8-sig")
 
     # 1) BOM / 前後の空白 / 中のスペースを削る
@@ -233,7 +248,47 @@ def load_report_df():
 
         df = grouped
 
+    _REPORT_DF_CACHE = df
+    _REPORT_DF_MTIME = mtime
+    _REPORT_NAMES_CACHE = None
+    _REPORT_NAMES_MTIME = None
     return df
+
+
+def get_company_names_cached() -> list[str]:
+    global _REPORT_NAMES_CACHE, _REPORT_NAMES_MTIME
+    try:
+        mtime = _get_report_mtime()
+    except OSError:
+        return []
+
+    if _REPORT_NAMES_CACHE is not None and _REPORT_NAMES_MTIME == mtime:
+        return _REPORT_NAMES_CACHE
+
+    df = load_report_df()
+    col_event = "イベント種別"
+    if col_event in df.columns:
+        df = _filter_interview_only(df, col_event)
+    col_candidates = ["企業名", "company_name"]
+    target_col = next((c for c in col_candidates if c in df.columns), None)
+    if not target_col:
+        _REPORT_NAMES_CACHE = []
+        _REPORT_NAMES_MTIME = mtime
+        return []
+
+    names = (
+        df[target_col]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .drop_duplicates()
+        .tolist()
+    )
+    _REPORT_NAMES_CACHE = names
+    _REPORT_NAMES_MTIME = mtime
+    return names
 
 
 
@@ -307,6 +362,113 @@ def normalize_format_value(value: str) -> str:
         return ""
     return ""
 
+def _has_online_strong_word(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    s = text.upper()
+
+    # 強いオンライン根拠（URL/会議ツール/明示語）
+    online_words = [
+        "オンライン",
+        "WEB",
+        "ZOOM",
+        "TEAMS",
+        "GOOGLE MEET",
+        "GOOGLEMEET",
+        "MEET",
+        "SKYPE",
+        "URL",
+        "HTTPS://",
+        "HTTP://",
+        "リンク",
+        "招待",
+        "ミーティング",
+        "会議URL",
+        "面接URL",
+        "WEB面接",
+        "リモート",
+    ]
+    return any(w in s for w in online_words)
+
+
+def _has_offline_strong_word(text: str) -> bool:
+    if not isinstance(text, str):
+        return False
+    s = text.upper()
+
+    # 強い対面根拠（場所/来社/集合/会場）
+    offline_words = [
+        "対面",
+        "来社",
+        "本社",
+        "支社",
+        "支店",
+        "会場",
+        "会議室",
+        "受付",
+        "入館",
+        "集合",
+        "現地",
+        "持参",
+        "筆記用具持参",
+        "交通費",
+        "住所",
+    ]
+    return any(w in s for w in offline_words)
+
+
+# address_kind の「確定カテゴリ」
+ONLINE_KIND_SET = {
+    "自宅",
+    "オンライン",
+    "WEB",
+    "リモート",
+}
+OFFLINE_KIND_SET = {
+    "企業",
+    "本社",
+    "支社",
+    "支店",
+    "会場",
+    "現地",
+    "対面",
+}
+
+
+def _resolve_format_label(row: pd.Series, col_address_kind: str, col_address: str, col_format: str) -> str:
+    address_kind = str(row.get(col_address_kind, "") or "").strip()
+    address = str(row.get(col_address, "") or "").strip()
+    fmt = str(row.get(col_format, "") or "").strip()
+
+    merged = f"{address_kind} {address} {fmt}"
+
+    # -------------------------
+    # A: 確定（最優先）
+    # -------------------------
+    if address_kind in ONLINE_KIND_SET:
+        return "オンライン"
+    if address_kind in OFFLINE_KIND_SET:
+        return "対面"
+
+    # 形式/住所/種別に強い根拠があれば確定
+    if _has_online_strong_word(merged):
+        return "オンライン"
+    if _has_offline_strong_word(merged):
+        return "対面"
+
+    # -------------------------
+    # B: 準確定（学校）
+    # ※現状の方針を維持：強いオンライン語がなければ対面
+    # -------------------------
+    if address_kind == "学校":
+        return "オンライン" if _has_online_strong_word(merged) else "対面"
+
+    # -------------------------
+    # C: 最後の強制決着（ここでは“未確定”を返さず対面）
+    # ※会社代表の最終決着は「最新レコード」でやる（後述）
+    # -------------------------
+    return "対面"
+
 
 def _round_label_from_index(idx: int) -> str:
     labels = {
@@ -324,53 +486,27 @@ def _round_label_from_index(idx: int) -> str:
     return labels.get(int(idx), f"{int(idx)}次面接")
 
 
-def _has_online_strong_word(text: str) -> bool:
-    if not isinstance(text, str):
-        return False
-    s = text.upper()
-    return any(
-        w in s
-        for w in [
-            "オンライン",
-            "WEB",
-            "ZOOM",
-            "TEAMS",
-            "GOOGLEMEET",
-            "MEET",
-            "SKYPE",
-        ]
-    )
 
 
-def _resolve_format_label(row: pd.Series, col_address_kind: str, col_address: str, col_format: str) -> str:
-    address_kind = str(row.get(col_address_kind, "") or "").strip()
-    address = str(row.get(col_address, "") or "").strip()
-    fmt = str(row.get(col_format, "") or "").strip()
 
-    if address_kind == "自宅":
-        return "オンライン"
-    if address_kind == "学校":
-        return "オンライン" if _has_online_strong_word(address + " " + fmt) else "対面"
-    if address_kind:
-        return "対面"
-
-    if _has_online_strong_word(address + " " + fmt):
-        return "オンライン"
-    return "対面"
-
-
-def _aggregate_format_labels(labels: list[str]) -> str:
+def _aggregate_format_labels(labels: list[str], latest_label: str | None = None) -> str:
     online = sum(1 for x in labels if x == "オンライン")
     offline = sum(1 for x in labels if x == "対面")
+
     if online > 0 and offline == 0:
         return "オンライン"
     if offline > 0 and online == 0:
         return "対面"
     if online == 0 and offline == 0:
-        return ""
+        # ここまで来たら最新（なければ対面）
+        return latest_label or "対面"
+
+    # ★拮抗は「最新」で決める（C-1）
     if abs(online - offline) <= 1:
-        return "オンライン・対面"
+        return latest_label or "対面"
+
     return "オンライン" if online > offline else "対面"
+
 
 
 def detect_dress_code(text):
@@ -607,29 +743,36 @@ def make_public_id(report_id: str) -> str:
 # ============================================================
 # AI 呼び出し（統一：system + user 対応）
 # ============================================================
+
+import os
+import requests
+
 def ask_ai(user_prompt: str, system_prompt: str | None = None) -> str:
-    base = str(os.getenv("OLLAMA_HOST", "http://localhost:11434") or "").strip()
+    # 優先順：OLLAMA_BASE_URL > OLLAMA_HOST >（Docker内）ollama0 >（ローカル）localhost
+    base = (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST") or "").strip()
+
+    if not base:
+        # Dockerで動いているなら service 名、そうでないなら localhost を使う
+        base = "http://ollama0:11434" if os.getenv("DOCKER") == "1" else "http://localhost:11434"
+
     if not base.startswith(("http://", "https://")):
         base = "http://" + base
+
     url = base.rstrip("/") + "/api/generate"
 
-    model = str(os.getenv("OLLAMA_MODEL", "qwen2.5:14b-instruct") or "").strip()
-    if not model:
-        model = "qwen2.5:14b-instruct"
+    model = (os.getenv("OLLAMA_MODEL") or "qwen2.5:14b-instruct").strip() or "qwen2.5:14b-instruct"
 
-    prompt = user_prompt if not system_prompt else (system_prompt.strip() + "\n\n" + user_prompt.strip())
+    payload = {
+        "model": model,
+        "prompt": (user_prompt or "").strip(),
+        "stream": False,
+        "options": {"temperature": 0.4},
+    }
+    if system_prompt and system_prompt.strip():
+        payload["system"] = system_prompt.strip()
 
     try:
-        r = requests.post(
-            url,
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False,
-                "options": {"temperature": 0.4},
-            },
-            timeout=600,
-        )
+        r = requests.post(url, json=payload, timeout=600)
     except Exception as e:
         return f"[ERROR] Ollama への接続に失敗しました: {e}"
 
@@ -765,124 +908,6 @@ def normalize_to_question(sentence: str) -> str:
 
     return f"{s}について教えてください。"
 
-
-# ============================================================
-# 回次推定（LLM）
-# ============================================================
-def infer_rounds_with_ai(records: list[dict]) -> dict[int, dict]:
-    if not records:
-        return {}
-
-    system = """
-あなたは就職活動の受験記録を正規化するアシスタントです。
-以下のルールに従って、面接区分を必ず「一次面接」または「最終面接」のどちらかに分類してください。
-
-【判別ルール（最優先）】
-1. 「最終」「Final」「最終選考」「役員面接」「社長面接」「内定直前」「意思確認」
-   → 必ず「最終面接」とする
-
-2. 「一次」「1次」「1st」「書類通過後」「最初の面接」「人事面接」
-   → 必ず「一次面接」とする
-
-【補助ルール】
-3. 面接回数が明示されていない場合：
-   - 面接が1回のみと記載されている → 「最終面接」
-   - 面接が複数回ある前提の記載 → 最初のものは「一次面接」
-
-※二次・三次など複数回の面接が存在する可能性がある
-
-4. オンライン／対面の別は面接区分の判断には一切影響しない
-
-5. 判断に迷う場合でも「不明」「その他」は使用せず、
-   文脈から最も妥当な方（一次 or 最終）を必ず選択する
-
-【出力制約】
-- 出力はJSON配列のみ
-- 各要素は { "idx": number, "label": "一次面接" | "最終面接" }
-- 理由や説明文は一切出力しない
-"""
-
-    lines = []
-    for r in records:
-        idx = r.get("idx")
-        dt = str(r.get("start_datetime", "") or "")
-        text = clean_text(str(r.get("text", "") or ""))[:600]
-        lines.append(f"[{idx}] {dt}\n{text}")
-
-    user = "以下の面接ログから回次を推定してください。\n\n" + "\n\n".join(lines)
-    out = ask_ai(user, system_prompt=system)
-    if isinstance(out, str) and out.startswith("[ERROR]"):
-        return {}
-
-    payload = _extract_json_value(out)
-    items = None
-    if isinstance(payload, list):
-        items = payload
-    elif isinstance(payload, dict) and isinstance(payload.get("items"), list):
-        items = payload["items"]
-    if not items:
-        return {}
-
-    result = {}
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-        idx = it.get("idx")
-        try:
-            idx = int(idx)
-        except Exception:
-            continue
-        label = str(it.get("label", "") or "").strip()
-        if label not in {"一次面接", "最終面接"}:
-            continue
-        if label == "一次面接":
-            result[idx] = {"round_index": 1, "is_final": False}
-        else:
-            result[idx] = {"round_index": None, "is_final": True}
-
-    return result
-
-
-def infer_is_final_round_with_ai(company_name: str, round_label: str, texts: list[str]) -> bool | None:
-    if not texts:
-        return None
-
-    cleaned = [clean_text(t) for t in texts if isinstance(t, str) and t.strip()]
-    if not cleaned:
-        return None
-
-    joined = "\n\n".join(f"- {t[:700]}" for t in cleaned[:8])
-    joined = joined[:6000]
-
-    system = """
-あなたは就職活動の面接ログから「最終面接かどうか」だけを判定するアシスタントです。
-出力は次の3択のみを厳守してください。
-
-最終である
-最終ではない
-判断不能
-""".strip()
-
-    user = f"""
-企業: {company_name}
-回次候補: {round_label}
-
-【面接ログ】
-{joined}
-""".strip()
-
-    out = ask_ai(user, system_prompt=system)
-    if not isinstance(out, str) or out.startswith("[ERROR]"):
-        return None
-
-    s = out.strip().replace("　", "")
-    if "最終である" in s:
-        return True
-    if "最終ではない" in s:
-        return False
-    if "判断不能" in s:
-        return None
-    return None
 
 
 # ============================================================
@@ -1064,7 +1089,7 @@ def generate_detailed_report(row: pd.Series) -> str:
 # 学生AI：学生の面接ログ要約
 # ============================================================
 def generate_student_ai_summary(student_id: str, max_records: int = 8) -> str:
-    df = load_report_df()
+    df = load_report_df().copy()
     sid = str(student_id).strip()
 
     if "学籍番号" not in df.columns:
@@ -1151,7 +1176,6 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
     else:
         df["_text"] = ""
     atmos = Counter()
-    form = Counter()
     dress = Counter()
     tag_counter = Counter()
 
@@ -1171,8 +1195,16 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
 
     top_tags = [k for k, _ in tag_counter.most_common(8)]
 
+    # 最終面接フラグ（最重要）
+    if col_result in df.columns:
+        df["__result_kind"] = df[col_result].astype(str).str.strip().str.upper()
+        df["__is_final"] = df["__result_kind"].isin(FINAL_RESULT_KINDS)
+    else:
+        df["__is_final"] = False
+    
     # latest_records
     df_latest = df.sort_values("start_dt_obj", ascending=False).head(LATEST_RECORDS_LIMIT).copy()
+
     latest_records = []
     for _, r in df_latest.iterrows():
         raw_text = str(r.get(col_text, "") or "")
@@ -1180,6 +1212,7 @@ def summarize_company_with_error(group: pd.DataFrame) -> tuple[dict | None, str 
         rec = {
             "start_datetime": str(r.get(col_start, "") or ""),
             "result": str(r.get(col_result, "") or ""),
+            "is_final": bool(r.get("__is_final", False)),
             "format": _resolve_format_label(r, col_address_kind, col_address, col_format),
             "memo": (t[:140] + "…") if len(t) > 140 else t,
             "questions": extract_questions(raw_text, max_q=3),
@@ -1219,6 +1252,7 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     col_event = "イベント種別"
     col_start = "開始日時"
     col_format = "形式"
+    col_result = "結果種別"
     col_text = "面接内容"
     col_address = "address"
     col_address_kind = "address_kind"
@@ -1287,26 +1321,16 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
     df_iv["_order_index"] = df_iv.groupby("_user_key").cumcount() + 1
     df_iv["round_index"] = df_iv["_order_index"].astype(int)
 
-    max_round_index = int(df_iv["round_index"].max()) if not df_iv.empty else 0
-    final_round_index = None
-    if ENABLE_ROUND_AI and max_round_index > 0:
-        candidate = df_iv[df_iv["round_index"] == max_round_index]
-        ai_verdict = infer_is_final_round_with_ai(
-            company_name=str(company_name).strip(),
-            round_label=_round_label_from_index(max_round_index),
-            texts=candidate[col_text].fillna("").astype(str).tolist(),
-        )
-        if ai_verdict is True:
-            final_round_index = max_round_index
+    # 結果種別を正規化（内定/辞退などの集計に使う）
+    if col_result in df_iv.columns:
+        df_iv["__result_kind"] = df_iv[col_result].astype(str).str.strip().str.upper()
+    else:
+        df_iv["__result_kind"] = ""
 
-    # =========================================================
-    # =========================================================
-    # 回次ラベル（最終面接は候補のみAI判定）
-    # =========================================================
+
+    # 回次ラベル：常に回次通り（一次/二次/三次…）
     def _label_for_round(idx: int) -> str:
-        if final_round_index is not None and int(idx) == int(final_round_index):
-            return "最終面接"
-        return _round_label_from_index(idx)
+        return _round_label_from_index(int(idx))
 
     df_iv["round_label"] = df_iv["round_index"].apply(_label_for_round)
 
@@ -1330,6 +1354,18 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
         # 件数＝その回に到達して実際に受けた人数
         count_people = int(sub["_user_key"].nunique())
 
+        # その回で「内定/辞退（OFFERED / RESCIND_OFFER）」になった人数（user単位）
+        offer_like_people = 0
+        if "__result_kind" in sub.columns:
+            offer_like_people = int(
+                sub.loc[sub["__result_kind"].isin(FINAL_RESULT_KINDS), "_user_key"].nunique()
+            )
+
+        status_text = f"{count_people}件"
+        if offer_like_people > 0:
+            status_text += f"（内定等{offer_like_people}件）"
+
+
         # ★ 0件の回次は表示しない
         if count_people == 0:
             continue
@@ -1339,7 +1375,13 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
             _resolve_format_label(row, col_address_kind, col_address, col_format)
             for _, row in sub.iterrows()
         ]
-        type_label = _aggregate_format_labels(types) or ""
+
+        # ★最新1件のラベル（C-1）
+        latest_row = sub.sort_values("start_dt_obj", ascending=False).iloc[0] if "start_dt_obj" in sub.columns and len(sub) > 0 else None
+        latest_label = _resolve_format_label(latest_row, col_address_kind, col_address, col_format) if latest_row is not None else None
+
+        type_label = _aggregate_format_labels(types, latest_label=latest_label) or ""
+
 
         # この回の面接テキスト
         round_texts_for_ai = sub[col_text].fillna("").astype(str).tolist()
@@ -1389,7 +1431,7 @@ def build_interview_records_for_company(company_name: str, student_no: str | Non
                 "title": label,
                 "year": "",
                 "term": "",
-                "status": f"{count_people}件",
+                "status": status_text,
                 "type": type_label,
                 "questions": top_questions,
                 "memo": memo_text,
